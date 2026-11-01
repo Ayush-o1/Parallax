@@ -1,7 +1,8 @@
 # Parallax — Architecture
 
-**Version:** 0.2.0  
-**Status:** Phase 1 — Design Review  
+**Version:** 0.3.0
+
+**Status:** Phase 2 — Schema Draft
 **Last updated:** 2026-11-01
 
 ---
@@ -75,73 +76,50 @@ Breaking these rules creates coupling. If a controller queries the database dire
 
 ## 3. Telemetry Ingestion Data Flow
 
-```
-OEM Simulator
-      │  POST /api/v1/ingest/:source
-      ▼
- IngestionController
-      │  extracts source identifier, raw body
-      ▼
- IngestionService.ingest(source, rawPayload)
-      │
-      ├─ 1. Identify source → select adapter
-      │
-      ├─ 2. Validate raw payload against source rules
-      │      └─ invalid → QuarantineRepository.save()
-      │                    return { status: 'QUARANTINED' }
-      │
-      ├─ 3. Adapter.normalize(rawPayload)
-      │      └─ produces CanonicalEvent
-      │
-      ├─ 4. Validate canonical values (ranges, types)
-      │
-      ├─ 5. Check idempotency
-      │      └─ duplicate → return { status: 'DUPLICATE' }
-      │         (database constraint as safety net)
-      │
-      ├─ 6. BEGIN TRANSACTION
-      │      ├─ IngestionEventRepository.save(rawPayload, status='ACCEPTED')
-      │      ├─ TelemetryRepository.save(canonicalEvent)
-      │      └─ VehicleStateRepository.updateIfNewer(canonicalEvent)
-      │         END TRANSACTION
-      │
-      └─ 7. (Phase 10) Enqueue background jobs for derived event detection
+```text
+HTTP request
+  1. Persist IngestionRequest(status=RECEIVED, rawBody=BYTEA); commit first.
+  2. Parse and extract events.
+     - Malformed request: request-level quarantine; status=MALFORMED.
+     - Valid request: create one PENDING IngestionEvent per event in the batch.
+  3. Process each event in an independent transaction.
+     - Invalid: write quarantine record and set event status=QUARANTINED.
+     - Duplicate: set event status=DUPLICATE; do not write reading or state.
+     - Accepted: write reading, conditionally upsert state, set event status.
+  4. Derive the request's final status from its event outcomes.
 ```
 
----
+Unexpected failures cannot erase the committed request body. Any event whose transaction did not commit remains pending and can be retried. Batch items have independent transactions, so one failure does not undo successful sibling outcomes.
 
 ## 4. Vehicle State Update Strategy
 
-A vehicle's "latest state" must be updated only when the incoming event is newer than the stored state.
+Use a conditional PostgreSQL UPSERT keyed by the unique `vehicle_id` in `vehicle_states`:
 
+```sql
+INSERT INTO vehicle_states (vehicle_id, latest_reading_id, last_event_time, trusted_odometer_km)
+VALUES ($vehicle_id, $reading_id, $event_time, $initial_trusted_odometer)
+ON CONFLICT (vehicle_id) DO UPDATE
+SET latest_reading_id = EXCLUDED.latest_reading_id,
+    last_event_time = EXCLUDED.last_event_time,
+    trusted_odometer_km = CASE
+      WHEN $odometer_suspicious OR $incoming_odometer IS NULL
+        THEN vehicle_states.trusted_odometer_km
+      ELSE $incoming_odometer
+    END
+WHERE vehicle_states.last_event_time < EXCLUDED.last_event_time;
 ```
-Incoming event time: T_event
-Stored state last_event_time: T_stored
 
-IF T_event > T_stored:
-    UPDATE vehicle state with new measurements
-ELSE:
-    Store telemetry history (do not skip it)
-    Skip vehicle state update
-```
+A unique-key conflict makes concurrent writes target the same database row. PostgreSQL serializes those writes and evaluates the `WHERE` condition against the current row while holding its row lock. This avoids an application-level read-compare-write race. The reading insert, conditional UPSERT, and event status update share one transaction.
 
-This handles out-of-order delivery: a delayed event is stored in history but cannot overwrite a newer known state.
-
-**Why use event time, not ingestion time?**  
-The OEM generates the event at `eventTime`. The backend receives it at `receivedAt`. These differ because of network delay, batching, or retry. If we used `receivedAt` to decide which is newer, a retried old event could overwrite current state with stale data.
-
----
+Late readings remain in history and cannot overwrite a newer state.
 
 ## 5. Idempotency Strategy
 
-Some OEMs provide a stable `externalEventId` per telemetry reading. For these, we enforce a database-level unique constraint on `(source, externalEventId)`.
+Telemetry event identifiers are unique within their vehicle and source for the current OEM contracts, but the contracts do not promise uniqueness across every vehicle using a source. Enforce `UNIQUE(source, vehicle_id, external_event_id)`. Widen the scope only if a source contract establishes source-wide uniqueness.
 
-**Why database-level, not just application-level?**  
-Application-level checks are vulnerable to a race condition: two concurrent requests both read "not a duplicate", both proceed to insert, and one fails with a constraint error. With a database unique constraint, the database enforces exclusivity atomically. The constraint violation is caught and translated to a `DUPLICATE` response.
+The database constraint is authoritative. An application pre-check may improve the response path but cannot prevent concurrent duplicate inserts. Every receipt attempt remains as an `IngestionEvent`; duplicate attempts receive `DUPLICATE` status but never create another normalized reading or update state.
 
-For OEMs that do not supply a stable event identifier, we generate an application-level fingerprint from `(vin, source, eventTime)` and apply the same constraint.
-
----
+Each derived event has a deterministic unique `dedupe_key` based on event type, vehicle, source, and stable per-vehicle external event ID at the trigger boundary. For example, `hard-braking:{vehicleId}:{source}:{externalEventId}`. Trip start/end use their crossing/ending event IDs, idling uses the first qualifying event in the idle episode, and staleness uses the current last-state event ID. These keys do not depend on random database UUIDs and remain stable across retries.
 
 ## 6. Module Map
 
@@ -179,6 +157,7 @@ src/
 │
 ├── repositories/
 │   ├── vehicle.repository.js
+│   ├── ingestionRequest.repository.js
 │   ├── ingestionEvent.repository.js
 │   ├── telemetry.repository.js
 │   ├── vehicleState.repository.js
@@ -199,55 +178,34 @@ src/
 
 ## 7. Database Architecture
 
-The full schema will be proposed for review in Phase 2. The planned core entities and relationships are:
-
 | Entity | Purpose | Key constraints |
 |--------|---------|-----------------|
-| `organizations` | Multi-tenant owner of vehicles and credentials | `UNIQUE(slug)` |
-| `vehicles` | Registered vehicles with VIN and OEM association | `UNIQUE(organization_id, vin)` |
-| `ingestion_events` | Every raw request body received with processing status | Preserve original body bytes; optionally retain parsed JSON |
-| `telemetry_readings` | Normalized canonical measurements | `UNIQUE(source, external_event_id)` — idempotency constraint |
-| `vehicle_states` | **One row per vehicle.** Latest known state. | `UNIQUE(vehicle_id)` — upsert target |
-| `derived_events` | Detected operational events (trips, idling, etc.) | FK to `vehicles`; nullable FK to `telemetry_readings` |
-| `quarantine_records` | Invalid or rejected payloads with reasons | `vehicle_id` is **nullable** — unknown VINs still preserved |
+| `organizations` | Vehicle owner; seeded demo organization for local use | UUID PK; unique slug |
+| `vehicles` | Registered vehicle with mandatory organization | UUID PK; FK organization; unique `(organization_id, vin)` |
+| `ingestion_requests` | One organization-scoped HTTP request and its original body | UUID PK; FK organization; `BYTEA` body; optional parsed `JSONB`; source is string |
+| `ingestion_events` | One extracted event and independent outcome | UUID PK; FK request; unique `(request_id, ordinal)` |
+| `telemetry_readings` | Accepted normalized event and odometer flag | UUID PK; unique event FK; unique `(source, vehicle_id, external_event_id)` |
+| `vehicle_states` | One latest state per vehicle and trusted odometer | UUID PK; unique vehicle; conditional UPSERT target |
+| `derived_events` | Operational events with deterministic dedupe key | UUID PK; unique dedupe key |
+| `quarantine_records` | Request- or event-level rejection record | Required request FK; nullable event and vehicle FKs |
 
-### Why `vehicle_id` is nullable on `quarantine_records`
+### Lifecycle and transaction boundaries
 
-A quarantine record must be stored for:
-1. Payloads with unknown VINs (no `vehicles` row exists to link to).
-2. Malformed payloads where no VIN is parseable at all.
-3. Payloads from unregistered OEM sources.
+1. Persist an `IngestionRequest(status=RECEIVED)` with original bytes before parsing or event processing.
+2. A parse failure produces request-level quarantine and `MALFORMED`; it does not require an `IngestionEvent`.
+3. A valid request creates one pending event per extracted batch member and moves to `PROCESSING`.
+4. Each event runs in its own transaction. Accepted work atomically writes the normalized reading, conditionally updates vehicle state, writes deterministic derived events, and changes event status. Invalid work atomically writes quarantine detail and sets `QUARANTINED`. A duplicate attempt is preserved as `DUPLICATE` without reading or state writes.
+5. The request becomes `COMPLETED` when all events are accepted or duplicate, or `COMPLETED_WITH_ERRORS` if one or more events are quarantined or accepted with warnings. Unexpected failures leave uncommitted event work pending and the request body durable for retry.
 
-If the foreign key were NOT NULL, these cases would cause the quarantine write itself to fail — and the payload would be silently lost, which is exactly what quarantine is designed to prevent.
+Request and event status values are defined in ADR-006 and `docs/data-contracts.md` §13. The request commit is deliberately outside per-event transactions so downstream failure cannot lose the raw request. Independent batch transactions prevent one event from rolling back its siblings.
 
-The `raw_vin` column stores the raw string from the payload for audit purposes even when no `vehicles` FK can be set.
+`quarantine_records.request_id` is required; `event_id` and `vehicle_id` are nullable. This supports malformed requests, unknown VINs, and unknown source identifiers. Store extracted `raw_vin` when available.
 
-Preserve the original request body as bytes (or lossless text) so malformed JSON is retained too. A parsed `JSONB` value may be stored alongside it when parsing succeeds; JSONB alone cannot preserve syntactically invalid JSON or the exact original representation.
+### Types and organization ownership
 
-### Transaction boundaries
+All primary and foreign identifiers use PostgreSQL UUID. Original request bodies use `BYTEA`; parsed JSON uses nullable `JSONB`; normalized measurements use bounded `DECIMAL(p,s)`; event, receipt, and detection times use `TIMESTAMPTZ`. Source identifiers remain strings so unknown OEM values can be preserved.
 
-The following operations are performed atomically within a single database transaction:
-
-```
-BEGIN
-  1. INSERT into ingestion_events (status = ACCEPTED)
-  2. INSERT into telemetry_readings
-        ON CONFLICT (source, external_event_id) → raises DUPLICATE, rolls back
-  3. UPSERT vehicle_states WHERE new.event_time > current.last_event_time
-COMMIT
-```
-
-If step 2 detects a duplicate (constraint violation), the entire transaction is rolled back and a `DUPLICATE` response is returned. No partial writes occur.
-
-If step 3's condition is false (out-of-order event), steps 1 and 2 still commit — the historical record is preserved. Only the state update is skipped.
-
-This guarantees:
-- Every accepted event has both a raw record (`ingestion_events`) and a normalized record (`telemetry_readings`).
-- No normalized record exists without a corresponding raw record.
-- Vehicle state is never updated by an older event.
-- Duplicate events are detected atomically.
-
----
+Every vehicle and ingestion request has a required organization FK. Unauthenticated local development uses a seeded organization with slug `demo`. The request is attributed to that organization for quarantine and audit queries. Authentication must derive organization ownership from verified credentials; clients cannot choose an arbitrary organization ID.
 
 ## 8. Technology Decisions
 

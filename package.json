@@ -17,7 +17,7 @@
     "db:migrate:prod": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:seed": "node scripts/seeds/seed.js",
+    "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset --force"
   },
   "dependencies": {
@@ -30,6 +30,9 @@
     "supertest": "^7.1.0"
   },
   "license": "MIT",
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
   "allowScripts": {
     "@prisma/client@6.19.3": true,
     "prisma@6.12.0": true,

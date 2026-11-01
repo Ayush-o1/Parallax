@@ -1,7 +1,8 @@
 # Parallax — Data Contracts
 
-**Version:** 0.2.0  
-**Status:** Phase 1 — Design Review  
+**Version:** 0.3.0
+
+**Status:** Phase 2 — Schema Draft
 **Last updated:** 2026-11-01
 
 ---
@@ -46,7 +47,7 @@ Each OEM produces structurally distinct payloads. The differences reflect real-w
 | `longitude` | number | Yes | WGS84 decimal degrees |
 | `fuel_level` | number | Yes | Percentage 0–100 |
 | `engine_on` | boolean | No | Optional engine running state; absent values normalize to `null` |
-| `event_id` | string | Yes | **Telemetry-event identifier** (unique per reading, not per vehicle) |
+| `event_id` | string | Yes | **Telemetry-event identifier**, stable and unique per vehicle reading; no source-wide uniqueness guarantee |
 | `timestamp` | string | Yes | ISO 8601 UTC — when the OEM generated this reading |
 
 > **Note on `event_id` naming:** In OEM Alpha, `event_id` is a telemetry-event identifier — it changes with every reading. It is not a vehicle identifier. The vehicle is identified by `vin`. See §6 for the idempotency constraint built on this field.
@@ -89,7 +90,7 @@ Each OEM produces structurally distinct payloads. The differences reflect real-w
 | `lng` | number | Yes | WGS84 longitude |
 | `fuel_percent` | number | Yes | Percentage 0–100 |
 | `accel_mss` | number | No | Longitudinal acceleration, m/s². Negative = deceleration |
-| `message_id` | string | Yes | **Telemetry-event identifier** (unique per reading) |
+| `message_id` | string | Yes | **Telemetry-event identifier**, stable and unique per vehicle reading; no source-wide uniqueness guarantee |
 | `event_timestamp` | string | Yes | ISO 8601 UTC |
 
 ---
@@ -138,7 +139,7 @@ Each OEM produces structurally distinct payloads. The differences reflect real-w
 >
 > The corrected design separates these concerns explicitly:
 > - **Vehicle identity:** `vehicle.vin` — stable across all readings.
-> - **Event identity for idempotency:** `vehicle.seq` — an integer that increments per telemetry reading. The adapter constructs the canonical `externalEventId` as `GAMMA-{vin}-{seq}` to ensure global uniqueness.
+> - **Event identity for idempotency:** `vehicle.seq` — an integer that increments per telemetry reading. The adapter constructs the canonical `externalEventId` as `GAMMA-{vin}-{seq}` so the vehicle scope is explicit in the value; database uniqueness remains vehicle-scoped.
 >
 > This mirrors the real-world pattern where telematics units maintain a sequence counter per ignition cycle or per connection session.
 
@@ -174,7 +175,7 @@ All accepted events are normalized to this structure before storage.
 | Field | Type | Nullable | Notes |
 |-------|------|----------|-------|
 | `source` | string | No | One of `OEM_ALPHA`, `OEM_BETA`, `OEM_GAMMA` |
-| `externalEventId` | string | No | Provider telemetry-event ID — unique per reading, not per vehicle |
+| `externalEventId` | string | No | Provider telemetry-event ID — stable per vehicle and reading; DB uniqueness is `(source, vehicleId, externalEventId)` |
 | `vin` | string | No | Vehicle Identification Number |
 | `eventTime` | ISO 8601 | No | When the OEM generated this reading |
 | `receivedAt` | ISO 8601 | No | When Parallax received and accepted the HTTP request |
@@ -308,38 +309,23 @@ Returns HTTP 400.
 
 ## 6. Idempotency Rules
 
-The `externalEventId` in the canonical schema is the telemetry-event identifier — it uniquely identifies a single reading, not the vehicle.
+Each OEM event identifier is stable for a vehicle's reading, but the contracts do not guarantee uniqueness across all vehicles reporting to the same source. The database therefore scopes identity to the vehicle:
 
-| OEM | Source field | Canonical `externalEventId` |
-|-----|-------------|---------------------------|
-| Alpha | `event_id` | value as-is (e.g. `ALPHA-EVT-10001`) |
-| Beta | `message_id` | value as-is (e.g. `BETA-EVT-20001`) |
-| Gamma | `vehicle.seq` | constructed: `GAMMA-{vin}-{seq}` (e.g. `GAMMA-1HGBH41JXMN109188-30001`) |
-
-The uniqueness constraint is enforced at the database level on the `telemetry_readings` table:
-
-```
-UNIQUE(source, external_event_id)
+```sql
+UNIQUE (source, vehicle_id, external_event_id)
 ```
 
-Application-level pre-checks are an optimisation only and do not replace the database constraint. See ADR-002.
+Alpha `event_id` and Beta `message_id` must be stable per vehicle; Gamma's sequence is per VIN and is canonicalized as `GAMMA-{vin}-{seq}`. The source identifier remains a string. Unknown source values are preserved on requests and quarantine records.
 
----
+Every HTTP receipt becomes an `IngestionRequest`; each extracted item becomes its own `IngestionEvent`, even when the item is a duplicate. A duplicate event status is committed without a second normalized reading or vehicle-state update. See ADR-002 for why the database unique constraint is authoritative.
 
-## 7. Out-of-Order Event Rules
+## 7. Event Ordering and Odometer Regression
 
-```
-Event arrives with eventTime = T_new
-Current vehicle state has last_event_time = T_stored
+Every valid, nonduplicate event with a registered vehicle is stored as a normalized reading, including late historical events. Vehicle state changes only when `eventTime` is newer than the current state's event time; the comparison is enforced in a conditional PostgreSQL UPSERT, not an application read-compare-write.
 
-Case 1: T_new > T_stored  →  Store reading + update vehicle state
-Case 2: T_new < T_stored  →  Store reading (history preserved) + skip state update
-Case 3: T_new == T_stored →  Store reading + skip state update (keep existing state)
-```
+Odometer regression is evaluated only for an event newer than the current state. A late event is not compared blindly with the latest odometer because its lower reading may be historically correct. For a newer event, an odometer below the trusted current value is suspicious: preserve the normalized reading with `odometerSuspicious=true`, add an `ODOMETER_REGRESSION` quarantine record, and update the latest state for other valid measurements while leaving the trusted odometer unchanged. If no baseline exists, accept the first reading as the baseline unless it fails ordinary validation.
 
-**Tie-breaking rationale:** When two events share the exact same `eventTime`, we cannot determine which measurement is "more current". Keeping the already-stored state avoids a last-write-wins race.
-
----
+A legitimate correction or meter replacement requires an explicit, audited baseline adjustment with operator, reason, and effective time. The 5% magnitude is a review-priority heuristic only; it does not identify the cause.
 
 ## 8. Stale Vehicle Detection Strategy
 
@@ -360,7 +346,7 @@ staleThreshold(source) = OEM_interval(source) × STALE_VEHICLE_FACTOR
 The factor (default 3) is configurable. It prevents transient connectivity glitches or a single missed report from triggering a stale alert.
 
 **Detection mechanism:**  
-A background worker (Phase 10) periodically queries `vehicle_states` for vehicles where `last_received_at < NOW() - staleThreshold(source)`. The stale threshold is computed per vehicle using the OEM source recorded at registration.
+A background worker (Phase 10) checks the most recent accepted telemetry `receivedAt` per vehicle against its per-source threshold. The `(vehicle_id, received_at DESC)` index supports this query. State measurement fields still advance only for newer event times.
 
 **Why `receivedAt` not `eventTime` for staleness?**  
 Staleness measures whether the backend is still receiving data, not whether the vehicle's last event was recent. An OEM could replay a batch of old events; `receivedAt` would update but `eventTime` might still be old. We use `receivedAt` (when we last saw a heartbeat from the OEM) and `eventTime` for state ordering — they serve different purposes.
@@ -401,23 +387,13 @@ This transparency prevents confusing a missing feature for a bug.
 
 ## 10. Quarantine Data Model
 
-Quarantine records must be stored **without** requiring a valid vehicle foreign key. Reasons:
+`IngestionRequest` preserves the complete raw HTTP body and request-level status. `IngestionEvent` represents one extracted item and its individual outcome. Quarantine records require the request foreign key, but both the event and vehicle foreign keys are nullable:
 
-1. A payload with an unknown VIN cannot be linked to a vehicle row.
-2. A malformed payload may not even contain a parseable VIN.
-3. Both cases must still be preserved for investigation.
+- Malformed request: `eventId=null`, `vehicleId=null`; preserve the request bytes and reason at request level.
+- Invalid extracted event: link `eventId`; `vehicleId` is null when VIN is unknown or no vehicle is registered.
+- Suspicious newer odometer: link both the event and known vehicle, while retaining the normalized reading for other usable measurements.
 
-The `quarantine_records` table uses:
-- `vehicle_id` — nullable foreign key (null when VIN is unknown or missing).
-- `raw_vin` — the raw string value extracted from the payload (or null if not parseable). Stored for audit even when no vehicle row exists.
-- `source` — always stored (identifies which OEM sent the payload).
-- `raw_body` — bytes (or lossless text) — the original HTTP request body, including malformed JSON.
-- `parsed_payload` — nullable JSONB — parsed representation when the body is valid JSON; not a replacement for `raw_body`.
-- `quarantine_reason` — enum code from §11.
-- `detail` — human-readable explanation of the specific failure.
-- `received_at` — when the payload arrived.
-
----
+Store the original body as `BYTEA`; store successfully parsed request/event JSON in nullable `JSONB` fields. JSONB alone cannot preserve malformed JSON or the exact body. `source` is a string so unrecognized identifiers survive quarantine.
 
 ## 11. Quarantine Reasons
 
@@ -433,30 +409,81 @@ The `quarantine_records` table uses:
 | `INVALID_EVENT_TIME` | OEM timestamp is present but cannot be parsed |
 | `TIMESTAMP_OUT_OF_RANGE` | eventTime exceeds the configured past or future bound |
 | `MALFORMED_PAYLOAD` | JSON structure does not match the expected OEM schema |
-| `ODOMETER_REGRESSION` | Odometer is lower than the stored historical maximum — see §12 |
+| `ODOMETER_REGRESSION` | Newer event's odometer is below the trusted state baseline — see §12 |
+| `MALFORMED_REQUEST` | Request body cannot be parsed into events |
 | `UNKNOWN_SOURCE` | No adapter registered for this source identifier |
 
 ---
 
 ## 12. Odometer Regression Policy
 
-An odometer reading that is lower than the vehicle's recorded historical maximum is suspicious. It could indicate:
+Compare odometers in event-time order. A valid late historical reading is stored without comparing it to the current latest odometer. This avoids labeling normal historical values as regressions.
 
-1. **Data corruption** in the OEM device or transmission.
-2. **Out-of-order delivery** of a genuinely older event.
-3. **Legitimate odometer correction** after a component replacement.
-4. **Vehicle sale or fleet transfer** where the odometer was reset.
+For a reading newer than vehicle state, if its odometer is below the trusted odometer baseline, store the normalized reading with `odometerSuspicious=true`, create an `ODOMETER_REGRESSION` quarantine record, and do not replace the trusted odometer. The event can still advance the latest-reading pointer and update its other valid measurements, such as speed, location, fuel, and event time.
 
-### Handling strategy
+The first valid reading establishes a baseline if none exists. A legitimate correction or meter replacement requires an explicit, audit-logged baseline adjustment with reason, effective time, and operator identity; the MVP does not infer or apply resets automatically. A 5% difference may prioritize review but does not classify the cause.
 
-| Scenario | Action |
-|----------|--------|
-| Any regression | Quarantine with `ODOMETER_REGRESSION`. Store the telemetry reading but mark `odometer_suspicious = true`. Do not update vehicle state odometer. |
-| Regression > 5% of max | Use 5% as a triage heuristic for manual review, not as proof of cause. Do not update state automatically. |
-| Legitimate correction or meter replacement | Require an explicit, audit-logged baseline adjustment with reason, effective time, and operator identity. The protected operator workflow is planned for Phase 9; until implemented, no regression silently becomes a new baseline. |
+## 13. Database Persistence Design
 
-**Why not silently accept regressions?**  
-An odometer that moves backward corrupts any distance-based analytics (fuel efficiency, maintenance scheduling, mileage billing). Silent acceptance would cause silent data quality degradation. Quarantining and flagging makes the anomaly visible.
+This design is documented before Prisma models are created. Primary and foreign keys are PostgreSQL UUIDs. All timestamps use `TIMESTAMPTZ(6)`, measurements use bounded `DECIMAL(p,s)`, request bodies use `BYTEA`, and successfully parsed payloads use `JSONB`. Incoming `source` values use strings rather than a closed enum.
 
-**Why still store the reading?**  
-The historical record preserves what the OEM reported. An operator investigating a data quality issue needs to see all readings, including suspicious ones, not just the clean ones.
+### Entities and relationships
+
+| Entity | Relationship and purpose |
+|--------|--------------------------|
+| `Organization` | Owns many vehicles. A seeded organization with slug `demo` serves local unauthenticated development. |
+| `Vehicle` | Requires an organization; has VIN and source identifier. |
+| `IngestionRequest` | One organization-scoped HTTP receipt and original body; has zero or many extracted events and quarantine records. |
+| `IngestionEvent` | One item extracted from a request; has an ordinal, source identity, optional event ID/VIN, processing status, and optional parsed event payload. |
+| `TelemetryReading` | One normalized accepted event; belongs to one ingestion event and one registered vehicle. |
+| `VehicleState` | At most one row per vehicle; references the latest accepted reading and stores the trusted odometer baseline. |
+| `QuarantineRecord` | Belongs to a request; may reference an event and a vehicle. This supports whole-request parse failure and unknown VINs. |
+| `DerivedEvent` | Belongs to a vehicle; may reference the reading that triggered it and always has an idempotency key. |
+
+All vehicles and ingestion requests require an organization from the first migration. The demo organization is seeded for local use; unauthenticated ingestion is attributed to it. When authentication is introduced, organization ownership must come from verified credentials; a client-supplied organization ID is never trusted for authorization or tenant selection.
+
+### Lifecycle states
+
+`IngestionRequest.status`: `RECEIVED`, `PROCESSING`, `COMPLETED`, `COMPLETED_WITH_ERRORS`, `MALFORMED`.
+
+`IngestionEvent.status`: `PENDING`, `ACCEPTED`, `ACCEPTED_WITH_WARNINGS`, `QUARANTINED`, `DUPLICATE`.
+
+Persist the request as `RECEIVED` before parsing. If parsing fails, create a request-level quarantine record and set `MALFORMED`. Otherwise create one pending event per extracted payload and process every event independently. A process crash before an event transaction commits leaves it pending; the durable request body remains available for retry. Set the request to `COMPLETED` when every item is accepted or duplicate, and `COMPLETED_WITH_ERRORS` when any item is quarantined or accepted with warnings. A request with an unexpected transient failure remains `PROCESSING` until retry completes.
+
+### Unique constraints and indexes
+
+- `Organization.slug` unique.
+- `Vehicle(organization_id, vin)` unique; index `(source, vin)` for registration/adapter resolution.
+- `IngestionRequest.organization_id` required; indexes `(organization_id, status, received_at)` and `(organization_id, source, received_at DESC)` support tenant-scoped inspection.
+- `IngestionEvent(request_id, ordinal)` unique; indexes `(status, created_at)` and `(source, raw_vin, external_event_id)` for processing and duplicate triage.
+- `TelemetryReading(ingestion_event_id)` unique, enforcing at most one normalized reading per event attempt.
+- `TelemetryReading(source, vehicle_id, external_event_id)` unique. This is vehicle-scoped because the OEM contracts do not guarantee source-wide uniqueness.
+- `TelemetryReading(vehicle_id, event_time DESC)` and `(vehicle_id, received_at DESC)` indexed for history and receipt-lag queries.
+- `VehicleState.vehicle_id` unique; `VehicleState.latest_reading_id` unique. The vehicle key is the conditional UPSERT conflict target.
+- `QuarantineRecord(request_id)`, `(event_id)`, `(vehicle_id)`, and `(reason, created_at)` indexed for audit and inspection.
+- `DerivedEvent.dedupe_key` unique; `(vehicle_id, occurred_at DESC)` and `(event_type, occurred_at DESC)` indexed for event history.
+
+### Per-event transactions
+
+- **Accepted:** In one transaction, insert the normalized reading; compare event time and conditionally UPSERT vehicle state; insert deterministic derived events; set event status `ACCEPTED`; commit.
+- **Suspicious newer odometer:** In one transaction, insert the normalized reading with `odometer_suspicious=true`; insert quarantine detail; conditionally update latest state and non-odometer measurements while preserving `trusted_odometer_km`; set `ACCEPTED_WITH_WARNINGS`; commit.
+- **Invalid:** In one transaction, insert event-linked quarantine information and set event status `QUARANTINED`; commit.
+- **Duplicate:** Preserve the `IngestionEvent` receipt attempt and set `DUPLICATE`; do not insert another reading or update state. The unique constraint determines the race-safe outcome.
+
+The raw request commit is outside these event transactions, so no event failure can roll back the original body. One batch item's transaction cannot roll back another item's outcome.
+
+### Atomic state UPSERT
+
+Use `INSERT ... ON CONFLICT (vehicle_id) DO UPDATE ... WHERE vehicle_states.last_event_time < EXCLUDED.last_event_time`. PostgreSQL locks the conflicting unique-key row and evaluates this condition against the current row. Concurrent events therefore serialize at the row and only the newer timestamp can advance state; application-level read-compare-write is not relied on. For a suspicious odometer, the update preserves the existing trusted odometer while advancing the latest reading pointer and event time.
+
+### Derived-event idempotency keys
+
+Construct `dedupe_key` from event type, vehicle UUID, source, and stable per-vehicle `external_event_id`, rather than a random database reading UUID. Example keys:
+
+- `hard-braking:{vehicleId}:{source}:{externalEventId}`
+- `trip-start:{vehicleId}:{source}:{crossingExternalEventId}`
+- `trip-end:{vehicleId}:{source}:{endingExternalEventId}`
+- `idling:{vehicleId}:{source}:{idleEpisodeStartExternalEventId}`
+- `stale:{vehicleId}:{source}:{lastStateExternalEventId}`
+
+The unique key makes a repeated detector execution a no-op for the same triggering event. A new transition has a different stable trigger ID and can create a new derived event.

@@ -1,0 +1,190 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum IngestionRequestStatus {
+  RECEIVED
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  MALFORMED
+
+  @@map("ingestion_request_status")
+}
+
+enum IngestionEventStatus {
+  PENDING
+  ACCEPTED
+  ACCEPTED_WITH_WARNINGS
+  QUARANTINED
+  DUPLICATE
+
+  @@map("ingestion_event_status")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique @db.VarChar(100)
+  name      String   @db.VarChar(200)
+  isDemo    Boolean  @default(false) @map("is_demo")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicles          Vehicle[]
+  ingestionRequests IngestionRequest[]
+
+  @@map("organizations")
+}
+
+model Vehicle {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  vin            String   @db.VarChar(32)
+  source         String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  telemetryReadings TelemetryReading[]
+  state             VehicleState?
+  quarantineRecords QuarantineRecord[]
+  derivedEvents     DerivedEvent[]
+
+  @@unique([organizationId, vin])
+  @@index([source, vin])
+  @@map("vehicles")
+}
+
+model IngestionRequest {
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @map("organization_id") @db.Uuid
+  source         String                 @db.Text
+  rawBody        Bytes                  @map("raw_body") @db.ByteA
+  parsedPayload  Json?                  @map("parsed_payload") @db.JsonB
+  status         IngestionRequestStatus @default(RECEIVED)
+  errorCode      String?                @map("error_code") @db.VarChar(100)
+  errorDetail    String?                @map("error_detail")
+  receivedAt     DateTime               @default(now()) @map("received_at") @db.Timestamptz(6)
+  parsedAt       DateTime?              @map("parsed_at") @db.Timestamptz(6)
+  completedAt    DateTime?              @map("completed_at") @db.Timestamptz(6)
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  events            IngestionEvent[]
+  quarantineRecords QuarantineRecord[]
+
+  @@index([organizationId, status, receivedAt])
+  @@index([organizationId, source, receivedAt(sort: Desc)])
+  @@map("ingestion_requests")
+}
+
+model IngestionEvent {
+  id              String               @id @default(uuid()) @db.Uuid
+  requestId       String               @map("request_id") @db.Uuid
+  ordinal         Int
+  source          String               @db.Text
+  externalEventId String?              @map("external_event_id")
+  rawVin          String?              @map("raw_vin") @db.Text
+  payload         Json?                @db.JsonB
+  eventTime       DateTime?            @map("event_time") @db.Timestamptz(6)
+  status          IngestionEventStatus @default(PENDING)
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  processedAt     DateTime?            @map("processed_at") @db.Timestamptz(6)
+
+  request           IngestionRequest   @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  telemetryReading  TelemetryReading?
+  quarantineRecords QuarantineRecord[]
+
+  @@unique([requestId, ordinal])
+  @@index([status, createdAt])
+  @@index([source, rawVin, externalEventId])
+  @@map("ingestion_events")
+}
+
+model TelemetryReading {
+  id                 String   @id @default(uuid()) @db.Uuid
+  ingestionEventId   String   @unique @map("ingestion_event_id") @db.Uuid
+  vehicleId          String   @map("vehicle_id") @db.Uuid
+  source             String   @db.VarChar(100)
+  externalEventId    String   @map("external_event_id")
+  eventTime          DateTime @map("event_time") @db.Timestamptz(6)
+  receivedAt         DateTime @map("received_at") @db.Timestamptz(6)
+  speedKph           Decimal  @map("speed_kph") @db.Decimal(8, 3)
+  odometerKm         Decimal? @map("odometer_km") @db.Decimal(12, 3)
+  odometerSuspicious Boolean  @default(false) @map("odometer_suspicious")
+  fuelPercent        Decimal  @map("fuel_percent") @db.Decimal(5, 2)
+  latitude           Decimal  @db.Decimal(9, 6)
+  longitude          Decimal  @db.Decimal(9, 6)
+  engineOn           Boolean? @map("engine_on")
+  accelMss           Decimal? @map("accel_mss") @db.Decimal(8, 4)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ingestionEvent IngestionEvent @relation(fields: [ingestionEventId], references: [id], onDelete: Restrict)
+  vehicle        Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  latestState    VehicleState?  @relation("LatestStateReading")
+  derivedEvents  DerivedEvent[]
+
+  @@unique([source, vehicleId, externalEventId])
+  @@index([vehicleId, eventTime(sort: Desc)])
+  @@index([vehicleId, receivedAt(sort: Desc)])
+  @@map("telemetry_readings")
+}
+
+model VehicleState {
+  id                String   @id @default(uuid()) @db.Uuid
+  vehicleId         String   @unique @map("vehicle_id") @db.Uuid
+  latestReadingId   String   @unique @map("latest_reading_id") @db.Uuid
+  lastEventTime     DateTime @map("last_event_time") @db.Timestamptz(6)
+  trustedOdometerKm Decimal? @map("trusted_odometer_km") @db.Decimal(12, 3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicle       Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  latestReading TelemetryReading @relation("LatestStateReading", fields: [latestReadingId], references: [id], onDelete: Restrict)
+
+  @@map("vehicle_states")
+}
+
+model QuarantineRecord {
+  id        String   @id @default(uuid()) @db.Uuid
+  requestId String   @map("request_id") @db.Uuid
+  eventId   String?  @map("event_id") @db.Uuid
+  vehicleId String?  @map("vehicle_id") @db.Uuid
+  source    String   @db.Text
+  rawVin    String?  @map("raw_vin") @db.Text
+  reason    String   @db.VarChar(100)
+  detail    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  request IngestionRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  event   IngestionEvent?  @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  vehicle Vehicle?         @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([requestId])
+  @@index([eventId])
+  @@index([vehicleId])
+  @@index([reason, createdAt(sort: Desc)])
+  @@map("quarantine_records")
+}
+
+model DerivedEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  vehicleId       String   @map("vehicle_id") @db.Uuid
+  sourceReadingId String?  @map("source_reading_id") @db.Uuid
+  eventType       String   @map("event_type") @db.VarChar(100)
+  severity        String   @db.VarChar(32)
+  dedupeKey       String   @unique @map("dedupe_key")
+  occurredAt      DateTime @map("occurred_at") @db.Timestamptz(6)
+  detectedAt      DateTime @default(now()) @map("detected_at") @db.Timestamptz(6)
+  explanation     String
+
+  vehicle       Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  sourceReading TelemetryReading? @relation(fields: [sourceReadingId], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId, occurredAt(sort: Desc)])
+  @@index([eventType, occurredAt(sort: Desc)])
+  @@map("derived_events")
+}

@@ -1,7 +1,7 @@
 # Parallax — Project Status
 
 **Last updated:** 2026-11-01  
-**Current phase:** Phase 2 database design — review pending
+**Current phase:** Phase 2 — Prisma schema foundation complete
 
 ---
 
@@ -33,7 +33,7 @@
 **Pushed:** Yes
 
 **Delivered:**
-- `docs/requirements.md` — 44 functional + 22 non-functional requirements
+- `docs/requirements.md` — 47 functional + 23 non-functional requirements, including Phase 2 persistence rules
 - `docs/architecture.md` — layer diagram, ingestion flow, module map, technology decisions
 - `docs/data-contracts.md` — 3 OEM payload schemas, canonical schema, unit conversion rules, timestamp semantics, quarantine reason codes
 - `docs/decisions/ADR-001-modular-monolith.md`
@@ -47,19 +47,24 @@
 
 ## Current Phase: Phase 2 — Database Design and Persistence Foundation
 
-**Objective:** Review and approve the initial PostgreSQL schema proposal before implementation.
+**Objective:** Implement the documented Prisma persistence foundation. The schema and idempotent seed are ready; no migration has been created or applied yet.
+
+**Delivered:**
+- `docs/decisions/ADR-006-ingestion-lifecycle-and-derived-event-idempotency.md`
+- `prisma/schema.prisma` — UUID and PostgreSQL types, ingestion lifecycle, and idempotency constraints
+- `prisma/seed.js` — idempotent `demo` organization seed
 
 **Upcoming tasks:**
-1. Review the entity and relationship proposal
-2. Confirm constraints, indexes, transaction boundaries, and raw payload handling
-3. After approval, configure Prisma with isolated development and test databases
-4. Implement migrations, seed data, and integration tests
+1. Review the Prisma schema and generated migration plan
+2. Create and apply the initial migration against `parallax_dev`
+3. Run the idempotent demo organization seed
+4. Add integration tests against `parallax_test` for constraints, transactions, and concurrency
 
 ---
 
 ## Known Issues
 
-- None at this stage.
+- No migrations or PostgreSQL integration tests exist yet; the schema has only been validated with Prisma tooling.
 
 ---
 
@@ -67,7 +72,7 @@
 
 | Version | Change | Migration |
 |---------|--------|-----------|
-| (none yet) | — | — |
+| Schema draft | Prisma schema created and validated; migration pending | — |
 
 ---
 
@@ -80,6 +85,8 @@
 | Per-OEM stale detection | ADR-003 |
 | Nullable vehicle relation for quarantine | ADR-004 |
 | Quarantine and flag odometer regressions | ADR-005 |
+| Durable request/event lifecycle and derived-event idempotency | ADR-006 |
+| Durable request/event lifecycle and derived-event idempotency | ADR-006 |
 
 ---
 

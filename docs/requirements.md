@@ -1,7 +1,8 @@
 # Parallax — Requirements
 
-**Version:** 0.2.0  
-**Status:** Phase 1 — Design Review  
+**Version:** 0.3.0
+
+**Status:** Phase 2 — Schema Draft
 **Last updated:** 2026-11-01
 
 ---
@@ -45,7 +46,7 @@
 
 | ID | Requirement |
 |----|-------------|
-| FR-19 | The system shall detect and silently discard duplicate telemetry events using database-level uniqueness on (source, externalEventId). |
+| FR-19 | The system shall preserve each receipt attempt and prevent duplicate normalized readings using database-level uniqueness on (source, vehicleId, externalEventId), matching the source contract's per-vehicle identifier scope. Duplicate attempts shall not update vehicle state. |
 | FR-20 | Out-of-order events shall be stored in telemetry history but shall not overwrite a newer vehicle state. |
 | FR-21 | Vehicle state updates shall compare event timestamps, not ingestion timestamps. |
 
@@ -83,7 +84,7 @@
 
 | ID | Requirement |
 |----|-------------|
-| FR-37 | Organizations shall be isolated — one org cannot access another's vehicles or telemetry. |
+| FR-37 | Organizations shall be isolated — one org cannot access another's vehicles or telemetry. Organization ownership shall be resolved from verified credentials, never an arbitrary organization ID supplied by a client. |
 | FR-38 | API clients shall authenticate using a client-credentials mechanism. |
 | FR-39 | Raw secrets shall never be stored; only a secure hash is stored. |
 | FR-40 | Credentials shall be revocable. |
@@ -96,6 +97,9 @@
 | FR-42 | The frontend shall display vehicle list with current state. |
 | FR-43 | The frontend shall display telemetry history, derived events, and quarantine records. |
 | FR-44 | All values displayed shall come from real API calls — no hardcoded data. |
+| FR-45 | Each HTTP ingestion request shall be persisted with its original body before parsing; each extracted batch item shall have an independent ingestion event and outcome. |
+| FR-46 | A malformed request shall be quarantined at request level. Invalid, duplicate, accepted, and accepted-with-warning events shall have distinct processing statuses. |
+| FR-47 | Derived events shall use deterministic unique deduplication keys so retries do not create duplicate operational events. |
 
 ---
 
@@ -152,6 +156,7 @@
 | NFR-20 | API tests shall cover success, validation failure, duplicate, and unauthorized scenarios. |
 | NFR-21 | Integration tests shall run exclusively against `parallax_test`. When `NODE_ENV=test`, the application shall automatically use `TEST_DATABASE_URL`. Unit tests that do not open database connections shall not require `DATABASE_URL` to be set. |
 | NFR-22 | Each HTTP request shall produce exactly one log line, even if the client disconnects before the response is sent. |
+| NFR-23 | Vehicle state writes shall use a conditional database UPSERT that advances state only for a newer event timestamp; application read-compare-write is insufficient. |
 
 ---
 
@@ -167,3 +172,6 @@ This section records changes made to requirements during the Phase 1 design revi
 | NFR-05 | Changed from "log but do not exit" to "log and exit" for unhandled rejections. | Continuing in an unknown state is more dangerous than restarting cleanly. Node 15+ already exits by default. |
 | NFR-21 | Added formal test-database isolation requirement. | Prevents integration tests from silently using the development database. |
 | NFR-22 | Added single-log-line requirement for aborted requests. | The original logger only listened to `finish`; aborted requests were invisible. |
+| FR-19 | Scoped idempotency to source, vehicle, and event ID because source-wide uniqueness is not guaranteed. | Current OEM contracts provide per-vehicle identifiers. |
+| FR-45–47 | Added request/event persistence, explicit processing outcomes, and derived-event idempotency. | Batch receipts and retries need independent durable outcomes. |
+| NFR-23 | Required conditional database UPSERT for vehicle state. | Application read-compare-write can race under concurrent ingestion. |

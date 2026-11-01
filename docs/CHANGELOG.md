@@ -6,6 +6,19 @@ Format: `[version] — date`
 
 ---
 
+## [0.3.0] — 2026-11-01
+
+### Added
+- Phase 2 Prisma schema with separate request and event records, UUIDs, PostgreSQL-native data types, per-vehicle idempotency, and deterministic derived-event keys.
+- Idempotent seed for the local `demo` organization.
+- ADR-006 for durable ingestion lifecycle and transaction boundaries.
+
+### Changed
+- Refined organization ownership, concurrency-safe state upserts, and event-time-aware odometer regression handling.
+- Documented request/event status lifecycle, unique constraints, and indexes.
+
+---
+
 ## [0.2.0] — 2026-11-01
 
 ### Changed

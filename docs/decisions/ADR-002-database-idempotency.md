@@ -1,4 +1,4 @@
-# ADR-002 — Database-Level Idempotency over Application-Level Only
+# ADR-002 — Database-Level, Vehicle-Scoped Event Idempotency
 
 **Date:** 2026-11-01  
 **Status:** Accepted  
@@ -8,38 +8,32 @@
 
 ## Context
 
-Telemetry events may be submitted more than once. This can happen due to:
-- OEM retry logic after a network timeout.
-- Simulator replaying events to test the system.
-- Downstream consumers re-delivering events (relevant in Phase 13 with Kafka).
+OEMs retry telemetry events after timeouts, and batch requests can be retried as a whole. Every receipt attempt must be preserved, while each normalized event must be stored at most once. Concurrent requests can race past an application-level existence check.
 
-We must ensure that processing the same event twice does not produce two normalized records or corrupt vehicle state.
+The current Alpha and Beta examples provide stable event identifiers per vehicle, but their contracts do not guarantee that an identifier is unique across all vehicles using a source. Gamma's sequence is explicitly per VIN.
 
 ## Decision
 
-We enforce idempotency at **both** the database level (primary) and the application level (optimisation).
+`IngestionRequest` records each HTTP attempt. It owns one or more `IngestionEvent` rows, one per extracted batch item. A duplicate attempt remains auditable with event status `DUPLICATE` but does not create another `TelemetryReading` or update vehicle state.
 
-**Database:** A `UNIQUE` constraint on `(source, external_event_id)` in the `telemetry_readings` table. The database rejects duplicate inserts atomically, regardless of concurrent requests.
+The database enforces:
 
-**Application:** We check for existence before inserting as an optimisation to return a `DUPLICATE` response without triggering a constraint violation exception in the happy path.
-
-## Why Not Application-Level Only?
-
-Consider two concurrent requests carrying the same event:
-
-```
-Request A                    Request B
-  │                            │
-  ├─ SELECT: not found          ├─ SELECT: not found
-  │                            │
-  ├─ INSERT ...                 ├─ INSERT ...  ← race: both insert
-  │                            │
+```sql
+UNIQUE (source, vehicle_id, external_event_id)
 ```
 
-Both pass the application-level check simultaneously. Both attempt to insert. Without a database constraint, both succeed and we have a duplicate record. With a database constraint, one succeeds and one gets a constraint violation that we catch and translate to a `DUPLICATE` response.
+on normalized readings. This vehicle-scoped key matches the guaranteed identity scope in the current contracts. It can be widened only after a source contract establishes source-wide uniqueness.
+
+`TelemetryReading.ingestion_event_id` is also unique so one ingestion attempt cannot produce multiple normalized readings.
+
+Application pre-checks may improve response handling, but the PostgreSQL unique constraint is the concurrency-safe authority. A unique conflict aborts that event's processing transaction; the request and event receipt rows were committed earlier, and a follow-up transaction marks that attempt `DUPLICATE`.
+
+## Why not application-level only?
+
+Two requests may both read "not found" before either inserts. PostgreSQL arbitrates the unique-key conflict atomically, allowing one normalized row and converting the other attempt to a duplicate without corrupting state.
 
 ## Trade-offs
 
-- **Performance:** The unique index adds a small overhead to every insert. This is acceptable — correctness always beats micro-optimisation.
-- **Error handling:** We must catch Prisma's `P2002` unique constraint error and translate it to an application-level `DUPLICATE` result rather than a 500.
-- **Fingerprinting:** For events without a stable external ID, we generate a deterministic fingerprint from `(vin, source, eventTime)`. Documented in `docs/data-contracts.md`.
+- The source and vehicle are part of every idempotency lookup and unique index.
+- An OEM that legitimately reuses event IDs for the same vehicle would need an additional stable session/epoch field in the key; silently weakening idempotency is not acceptable.
+- Quarantine and duplicate receipt attempts remain separate from canonical telemetry history.
