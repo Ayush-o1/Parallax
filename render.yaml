@@ -77,6 +77,8 @@ services:
     name: parallax-queue
     region: singapore
     plan: 256mb
+    # No public client ranges. Services use Render's private network URL.
+    ipAllowList: []
     maxmemoryPolicy: noeviction
     persistenceMode: journal-snapshot
 
@@ -88,3 +90,5 @@ databases:
     databaseName: parallax
     user: parallax_app
     diskSizeGB: 5
+    # Keep PostgreSQL reachable only through Render's private network.
+    ipAllowList: []

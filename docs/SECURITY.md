@@ -8,7 +8,7 @@
 
 ## Authentication and authorization
 
-API clients authenticate with `client_credentials`. Secrets are generated with a cryptographic random source, hashed with bcrypt, and emitted only once by `scripts/api-client.js`. JOSE signs short-lived HS256 access tokens; verification pins `HS256`, validates expiry, and loads the current client row so revocation and role changes take effect immediately. Signing keys are required in production, at least 32 bytes, and must be kept in a secret manager.
+API clients authenticate with `client_credentials`. Secrets are generated with a cryptographic random source, hashed with bcrypt, and emitted only once by `scripts/api-client.js`. JOSE signs short-lived HS256 access tokens; verification pins `HS256`, requires expiry and tenant/client claims, and loads the current client row. REST calls reject revoked clients immediately. A connected Socket.IO session rechecks active client, tenant, and role every 15 seconds and disconnects at token expiry; a revocation can therefore take up to one check interval to close an existing socket.
 
 Roles are intentionally small:
 
@@ -18,7 +18,7 @@ Roles are intentionally small:
 | `INGESTOR` | Viewer operations plus telemetry ingestion. |
 | `ADMIN` | Ingestor operations plus vehicle registration and update. |
 
-The role is read from PostgreSQL on each authenticated request; it is not trusted from a client or token field. The migration preserves existing API clients as `ADMIN` to avoid silently breaking deployed clients. New clients default to `VIEWER`; choose a narrower role explicitly.
+The role is read from PostgreSQL on each authenticated request; it is not trusted from a client or token field. The migration preserves existing API clients as `ADMIN` to avoid silently breaking deployed clients. New clients default to `VIEWER`; choose a narrower role explicitly. Connected sockets are disconnected if their database role changes.
 
 REST requests and Socket.IO handshakes both require a valid bearer token in production. The client sends the Socket.IO token in the `auth` handshake object, not a URL query. The socket joins only the organization room resolved from its active client row. Local demo bypass applies only outside production. The dashboard stores no credential/token in `localStorage` or `sessionStorage`; reload requires reconnecting.
 

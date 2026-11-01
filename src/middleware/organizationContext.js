@@ -14,6 +14,9 @@ async function authenticate(req) {
   } catch {
     throw new AppError(401, 'INVALID_TOKEN', 'Bearer token is invalid or expired.');
   }
+  if (typeof claims.sub !== 'string' || typeof claims.org !== 'string' || !Number.isInteger(claims.exp)) {
+    throw new AppError(401, 'INVALID_TOKEN', 'Bearer token is invalid or expired.');
+  }
   const client = await prisma.apiClient.findFirst({ where: { id: claims.sub, revokedAt: null } });
   if (!client || client.organizationId !== claims.org) {
     throw new AppError(401, 'INVALID_TOKEN', 'Bearer token is invalid or revoked.');

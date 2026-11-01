@@ -1,5 +1,6 @@
 'use strict';
 
+require('dotenv').config({ quiet: true });
 const { startSimulator, DEFAULT_INTERVALS } = require('../src/simulators');
 
 const source = process.env.SIM_SOURCE || 'OEM_ALPHA';
@@ -7,6 +8,7 @@ const count = Number(process.env.SIM_VEHICLES || 3);
 const speedMultiplier = Number(process.env.SIM_SPEED || 1);
 const endpoint = process.env.INGEST_URL || 'http://localhost:3000/api/v1/ingest';
 const token = process.env.PARALLAX_TOKEN;
+const registrationToken = process.env.PARALLAX_ADMIN_TOKEN || token;
 
 function makeVin(index) {
   const suffix = `${index}`.padStart(6, '0');
@@ -27,10 +29,12 @@ async function deliver({ source: eventSource, vin, payload, copies = 1, kind }) 
 async function registerVehicles(vehicles) {
   for (const vehicleVin of vehicles) {
     const response = await fetch(`${endpoint.replace(/\/api\/v1\/ingest$/, '')}/api/v1/vehicles`, {
-      method: 'POST', headers: { 'content-type': 'application/json', ...(token && { authorization: `Bearer ${token}` }) },
+      method: 'POST', headers: { 'content-type': 'application/json', ...(registrationToken && { authorization: `Bearer ${registrationToken}` }) },
       body: JSON.stringify({ vin: vehicleVin, source }),
     });
-    if (![201, 409].includes(response.status)) throw new Error(`Could not register ${vehicleVin} (${response.status}).`);
+    if (![201, 409].includes(response.status)) {
+      throw new Error(`Could not register ${vehicleVin} (${response.status}); set PARALLAX_ADMIN_TOKEN to an ADMIN access token.`);
+    }
   }
 }
 

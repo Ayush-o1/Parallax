@@ -87,11 +87,6 @@ async function recoverPending(queue) {
 async function startWorker() {
   if (!config.redisUrl) throw new Error('Set REDIS_URL to start the background worker.');
   const heartbeat = new Redis(config.redisUrl, { maxRetriesPerRequest: 1, connectTimeout: 3000 });
-  const writeHeartbeat = () => heartbeat.set('parallax:worker:heartbeat', new Date().toISOString(), 'EX', 30)
-    .catch((error) => logger.warn('worker heartbeat update failed', { message: error.message }));
-  await writeHeartbeat();
-  const heartbeatTimer = setInterval(writeHeartbeat, 10_000);
-  heartbeatTimer.unref();
   const queue = new Queue(QUEUE_NAME, { connection: redisConnection() });
   const deadLetters = new Queue(DEAD_LETTER_QUEUE, { connection: redisConnection() });
   const worker = new Worker(QUEUE_NAME, async (job) => {
@@ -115,7 +110,16 @@ async function startWorker() {
     }
   });
   worker.on('error', (error) => logger.error('ingestion worker error', { message: error.message }));
+  await worker.waitUntilReady();
   const recovered = await recoverPending(queue);
+  const writeHeartbeat = () => heartbeat.set('parallax:worker:heartbeat', new Date().toISOString(), 'EX', 30);
+  // Publish readiness only after BullMQ is connected and durable pending
+  // requests have been reconciled with the queue.
+  await writeHeartbeat();
+  const heartbeatTimer = setInterval(() => writeHeartbeat().catch((error) => {
+    logger.warn('worker heartbeat update failed', { message: error.message });
+  }), 10_000);
+  heartbeatTimer.unref();
   const staleTimer = setInterval(() => detectStaleVehicles().catch((error) => logger.error('stale vehicle scan failed', { message: error.message })), 15_000);
   logger.info('ingestion worker started', { concurrency: worker.opts.concurrency, recovered });
   return async () => {

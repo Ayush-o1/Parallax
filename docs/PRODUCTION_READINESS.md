@@ -2,6 +2,16 @@
 
 Review date: 2026-11-01. This review is based on the checked-in implementation and local verification, not a live cloud deployment.
 
+The final pre-launch review corrected Render network allow-lists, added socket expiry/revocation checks, delayed worker readiness until queue recovery completes, and separated simulator registration credentials from ingestion credentials.
+
+## Verification record
+
+- `npm test`: 9 integration, 30 API, and 22 unit tests passed; Playwright passed.
+- A production-mode Compose stack completed migration and seed, created role-scoped clients from the production image, and reported database, Redis, and worker readiness. Authenticated browser verification covered sign-in, live Socket.IO, a telemetry update, VIN search/detail, ingestion receipt inspection, invalid-event quarantine, events, and mobile layout with no browser errors.
+- `npx prisma validate`, production `npm audit --omit=dev`, production Docker build, development and production Compose validation, JavaScript syntax checks, `git diff --check`, and Gitleaks passed. The dependency audit found no vulnerabilities; Gitleaks found no secrets.
+- `render.yaml` passed validation against Render's published JSON Schema. The Render CLI semantic/workspace check was not run because this environment has no Render login or workspace selected. No cloud resources were created.
+- These are local checks only. A public deployment, provider-side Blueprint apply, custom domain/TLS, provider backup configuration, and restore drill remain unverified.
+
 ## Findings and disposition
 
 | Severity | Finding | Disposition |
@@ -16,6 +26,9 @@ Review date: 2026-11-01. This review is based on the checked-in implementation a
 | Medium | Production settings were incompletely documented and mostly relied on implicit Prisma pool sizing. | Fixed: `.env.example` now inventories application settings; Prisma pool and timeout settings are validated and applied to application connections. |
 | Medium | Browser behavior had no repeatable CI end-to-end check and ingestion lacked a receipt detail endpoint. | Fixed: Playwright journey covers overview, vehicle inspection, receipt payload, quarantine, events, and mobile width; tenant-scoped request detail endpoint added. |
 | Medium | One local Redpanda node could be mistaken for redundant streaming infrastructure. | Fixed in deployment guidance: it is explicitly development-only; the recommended public demo leaves Kafka disabled. |
+| High | Render Key Value required an explicit public-IP allow-list, and the database's public-IP policy was implicit. | Fixed in `render.yaml`: both use `ipAllowList: []`; app services resolve the private connection strings. |
+| High | A connected WebSocket stayed authorized until disconnect even if its client was revoked or its token expired. | Fixed: claims must include expiry; active socket clients/roles are rechecked every 15 seconds, and sockets close at expiry. REST checks revocation on every request. |
+| Medium | The simulator used its ingestion token for VIN registration, which requires ADMIN and prevented the documented least-privilege flow. | Fixed: `PARALLAX_ADMIN_TOKEN` is used only for vehicle registration; `PARALLAX_TOKEN` remains the INGESTOR token for telemetry. |
 | Medium | No restore exercise had been performed. | Open operational action: backup restore is documented, but no external managed-database backup exists yet and no restore has been verified. Do not load real fleet data until a restore drill succeeds. |
 | Medium | Multi-instance Socket.IO fanout and distributed rate-limit storage are not configured. | Open scale limitation: the recommended Blueprint starts one web instance. Before horizontal web scaling, add a Socket.IO shared adapter and shared rate-limit store, then test cross-instance delivery. |
 | Low | Operational-event rules are intentionally source-limited and no alert routing is configured. | Documented: telemetry is synthetic; engine-on and acceleration signals are only emitted where the source provides them. Add external alerting only when a hosted operator needs it. |
@@ -23,13 +36,13 @@ Review date: 2026-11-01. This review is based on the checked-in implementation a
 ## Verified security boundaries
 
 - Client secrets are bcrypt hashes; one-time credential creation prints the secret only at the trusted CLI boundary.
-- Access tokens use JOSE HS256 with explicit algorithm verification, expiry, and revocation checked against PostgreSQL on every REST and Socket.IO connection.
+- Access tokens use JOSE HS256 with explicit algorithm and required expiry verification. REST requests check revocation against PostgreSQL every time; sockets recheck the active client, tenant, and role every 15 seconds and close at token expiry.
 - Organization identity and role come from the active API-client database row. Request-supplied organization IDs do not select tenant data.
 - `VIEWER` can inspect; `INGESTOR` can ingest and inspect; `ADMIN` can manage vehicles and ingest. Local demo bypass is disabled in production.
 - Token exchange is separately rate-limited. API responses include request IDs; request logs omit credentials, bodies, and raw URLs.
 - Helmet headers, a same-origin static/API deployment, request size limits, bounded pagination, input validation, and explicit HTTP timeouts are enabled.
 - `/metrics` requires a separate constant-time bearer comparison in production. Health responses expose dependency state only, not credentials or database details.
-- Socket.IO requires a bearer token in its handshake in production and joins only the database-resolved organization room. It accepts a short-lived bearer credential, not ambient cookies.
+- Socket.IO requires a bearer token in its handshake in production and joins only the database-resolved organization room. It accepts a short-lived bearer credential, not ambient cookies. Socket revocation takes up to 15 seconds to propagate.
 
 ## Database and processing guarantees
 

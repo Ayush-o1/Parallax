@@ -5,7 +5,7 @@
 PostgreSQL is the durable source of truth for request bytes, event outcomes, normalized telemetry, vehicle state, quarantine, operational events, clients, and optional Kafka outbox/inbox records. Redis stores BullMQ queue/lock state and a 30-second worker heartbeat. It is replaceable queue infrastructure, not a telemetry archive. Kafka is optional and is disabled by the recommended Render configuration.
 
 - `/health/live` reports process liveness.
-- `/health/ready` executes a database check, Redis ping, and (in production) an expiring worker heartbeat check. A healthy web service with no worker is not ready.
+- `/health/ready` executes a database check, Redis ping, and (in production) an expiring worker heartbeat check. A healthy web service with no worker is not ready. The worker publishes its heartbeat only after BullMQ is connected and durable pending requests have been reconciled.
 - `/metrics` returns Prometheus metrics only with the production metrics bearer token.
 - JSON request logs include `reqId`; the HTTP response exposes the same value as `X-Request-Id`.
 
@@ -46,7 +46,7 @@ The Prisma pool defaults to 10 connections per process with a 10-second pool wai
 
 ## Graceful shutdown and restart
 
-The web Node process handles `SIGTERM`/`SIGINT`, stops accepting requests, closes Socket.IO, and disconnects Prisma. BullMQ worker `close()` waits for active jobs; its heartbeat is removed during shutdown. On restart, pending requests are recovered from PostgreSQL. Redis persistence is enabled in the production Compose alternative. A managed Redis service should use persistence for queue recovery; if Redis is lost, inspect durable pending requests and worker recovery before resuming traffic.
+The web Node process handles `SIGTERM`/`SIGINT`, stops accepting requests, closes Socket.IO, and disconnects Prisma. A connected socket rechecks its client record every 15 seconds and closes at token expiry; a revoke may therefore take up to 15 seconds to end that connection. BullMQ worker `close()` waits for active jobs; its heartbeat is removed during shutdown. On restart, pending requests are recovered from PostgreSQL. Redis persistence is enabled in the production Compose alternative. A managed Redis service should use persistence for queue recovery; if Redis is lost, inspect durable pending requests and worker recovery before resuming traffic.
 
 ## Troubleshooting checklist
 

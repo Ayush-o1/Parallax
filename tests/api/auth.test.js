@@ -80,6 +80,101 @@ describe('client credentials and tenant authorization', () => {
     }));
   });
 
+  it('disconnects established sockets after client revocation', async () => {
+    let checkRevocation;
+    const realSetInterval = global.setInterval;
+    const realClearInterval = global.clearInterval;
+    global.setInterval = (callback, interval) => {
+      assert.equal(interval, 15_000);
+      checkRevocation = callback;
+      return { unref() {} };
+    };
+    global.clearInterval = () => {};
+    let monitoredClient;
+    let socket;
+    try {
+      const secret = crypto.randomBytes(24).toString('base64url');
+      monitoredClient = await prisma.apiClient.create({ data: {
+        organizationId: orgA.id,
+        name: 'revocation socket test',
+        clientId: `socket-revoke-${suffix}`,
+        secretHash: await bcrypt.hash(secret, 4),
+        role: 'VIEWER',
+      } });
+      const { issueToken } = require('../../src/services/auth.service');
+      const issued = await issueToken({ grant_type: 'client_credentials', client_id: monitoredClient.clientId, client_secret: secret });
+      const listeners = new Map();
+      socket = {
+        handshake: { auth: { token: issued.access_token } },
+        data: {},
+        disconnected: false,
+        once(event, listener) { listeners.set(event, listener); },
+        disconnect() {
+          this.disconnected = true;
+          listeners.get('disconnect')?.();
+        },
+      };
+      const socketAuth = require('../../src/realtime/socketAuth');
+      await new Promise((resolve, reject) => socketAuth(socket, (error) => error ? reject(error) : resolve()));
+      await prisma.apiClient.update({ where: { id: monitoredClient.id }, data: { revokedAt: new Date() } });
+      await checkRevocation();
+      assert.equal(socket.disconnected, true);
+    } finally {
+      if (socket && !socket.disconnected) socket.disconnect();
+      global.setInterval = realSetInterval;
+      global.clearInterval = realClearInterval;
+      if (monitoredClient) await prisma.apiClient.deleteMany({ where: { id: monitoredClient.id } });
+    }
+  });
+
+  it('disconnects established sockets when their access token expires', async () => {
+    let expireSocket;
+    let expiryDelay;
+    const realSetTimeout = global.setTimeout;
+    const realClearTimeout = global.clearTimeout;
+    let monitoredClient;
+    let socket;
+    try {
+      const secret = crypto.randomBytes(24).toString('base64url');
+      monitoredClient = await prisma.apiClient.create({ data: {
+        organizationId: orgA.id,
+        name: 'expiry socket test',
+        clientId: `socket-expiry-${suffix}`,
+        secretHash: await bcrypt.hash(secret, 4),
+        role: 'VIEWER',
+      } });
+      const { issueToken } = require('../../src/services/auth.service');
+      const issued = await issueToken({ grant_type: 'client_credentials', client_id: monitoredClient.clientId, client_secret: secret });
+      const listeners = new Map();
+      socket = {
+        handshake: { auth: { token: issued.access_token } },
+        data: {},
+        disconnected: false,
+        once(event, listener) { listeners.set(event, listener); },
+        disconnect() {
+          this.disconnected = true;
+          listeners.get('disconnect')?.();
+        },
+      };
+      global.setTimeout = (callback, delay) => {
+        expireSocket = callback;
+        expiryDelay = delay;
+        return { unref() {} };
+      };
+      global.clearTimeout = () => {};
+      const socketAuth = require('../../src/realtime/socketAuth');
+      await new Promise((resolve, reject) => socketAuth(socket, (error) => error ? reject(error) : resolve()));
+      assert.ok(expiryDelay > 0 && expiryDelay <= issued.expires_in * 1000);
+      expireSocket();
+      assert.equal(socket.disconnected, true);
+    } finally {
+      if (socket && !socket.disconnected) socket.disconnect();
+      global.setTimeout = realSetTimeout;
+      global.clearTimeout = realClearTimeout;
+      if (monitoredClient) await prisma.apiClient.deleteMany({ where: { id: monitoredClient.id } });
+    }
+  });
+
   it('rejects an unauthenticated Socket.IO handshake in production mode', () => {
     const { spawnSync } = require('node:child_process');
     const result = spawnSync(process.execPath, ['-e', `
