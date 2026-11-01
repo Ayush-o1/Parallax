@@ -41,7 +41,8 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
   logger.error('unhandled error', {
     status,
     message: err.message,
-    path:    req.path,
+    // Use the route template rather than a raw URL that could contain IDs.
+    path:    req.route ? `${req.baseUrl}${req.route.path}` : 'unmatched',
     method:  req.method,
     // Only include stack in non-production to avoid log bloat in prod.
     ...(config.isDevelopment() && { stack: err.stack }),

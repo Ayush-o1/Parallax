@@ -1,7 +1,7 @@
 # Parallax — Architecture
 
-**Version:** 0.1.0  
-**Status:** Phase 1 — Draft  
+**Version:** 0.2.0  
+**Status:** Phase 1 — Design Review  
 **Last updated:** 2026-11-01
 
 ---
@@ -199,16 +199,53 @@ src/
 
 ## 7. Database Architecture
 
-Full schema is documented in `docs/database-design.md`. Core entities:
+The full schema will be proposed for review in Phase 2. The planned core entities and relationships are:
 
-| Entity | Purpose |
-|--------|---------|
-| `vehicles` | Registered vehicles with VIN and OEM association |
-| `ingestion_events` | Every raw payload received, with processing status |
-| `telemetry_readings` | Normalized canonical measurements |
-| `vehicle_states` | Latest known state per vehicle (one row per vehicle) |
-| `derived_events` | Detected operational events (trips, idling, etc.) |
-| `quarantine_records` | Invalid or rejected payloads with reasons |
+| Entity | Purpose | Key constraints |
+|--------|---------|-----------------|
+| `organizations` | Multi-tenant owner of vehicles and credentials | `UNIQUE(slug)` |
+| `vehicles` | Registered vehicles with VIN and OEM association | `UNIQUE(organization_id, vin)` |
+| `ingestion_events` | Every raw request body received with processing status | Preserve original body bytes; optionally retain parsed JSON |
+| `telemetry_readings` | Normalized canonical measurements | `UNIQUE(source, external_event_id)` — idempotency constraint |
+| `vehicle_states` | **One row per vehicle.** Latest known state. | `UNIQUE(vehicle_id)` — upsert target |
+| `derived_events` | Detected operational events (trips, idling, etc.) | FK to `vehicles`; nullable FK to `telemetry_readings` |
+| `quarantine_records` | Invalid or rejected payloads with reasons | `vehicle_id` is **nullable** — unknown VINs still preserved |
+
+### Why `vehicle_id` is nullable on `quarantine_records`
+
+A quarantine record must be stored for:
+1. Payloads with unknown VINs (no `vehicles` row exists to link to).
+2. Malformed payloads where no VIN is parseable at all.
+3. Payloads from unregistered OEM sources.
+
+If the foreign key were NOT NULL, these cases would cause the quarantine write itself to fail — and the payload would be silently lost, which is exactly what quarantine is designed to prevent.
+
+The `raw_vin` column stores the raw string from the payload for audit purposes even when no `vehicles` FK can be set.
+
+Preserve the original request body as bytes (or lossless text) so malformed JSON is retained too. A parsed `JSONB` value may be stored alongside it when parsing succeeds; JSONB alone cannot preserve syntactically invalid JSON or the exact original representation.
+
+### Transaction boundaries
+
+The following operations are performed atomically within a single database transaction:
+
+```
+BEGIN
+  1. INSERT into ingestion_events (status = ACCEPTED)
+  2. INSERT into telemetry_readings
+        ON CONFLICT (source, external_event_id) → raises DUPLICATE, rolls back
+  3. UPSERT vehicle_states WHERE new.event_time > current.last_event_time
+COMMIT
+```
+
+If step 2 detects a duplicate (constraint violation), the entire transaction is rolled back and a `DUPLICATE` response is returned. No partial writes occur.
+
+If step 3's condition is false (out-of-order event), steps 1 and 2 still commit — the historical record is preserved. Only the state update is skipped.
+
+This guarantees:
+- Every accepted event has both a raw record (`ingestion_events`) and a normalized record (`telemetry_readings`).
+- No normalized record exists without a corresponding raw record.
+- Vehicle state is never updated by an older event.
+- Duplicate events are detected atomically.
 
 ---
 
@@ -220,7 +257,7 @@ Full schema is documented in `docs/database-design.md`. Core entities:
 | Runtime | Node.js 24 | Installed version; LTS-equivalent line |
 | Framework | Express.js | Minimal, explicit, widely used in industry |
 | ORM | Prisma | Type-safe queries, migration management, known technology |
-| Database | PostgreSQL | Relational integrity, JSONB for raw payloads, production-grade |
+| Database | PostgreSQL | Relational integrity, JSONB for parsed payloads, byte-preserving raw request storage |
 | Test runner | node:test | Built into Node 18+, zero extra dependency |
 | HTTP test client | supertest | Standard for Express API testing |
 

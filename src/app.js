@@ -13,8 +13,8 @@
  *   makes tests fully self-contained.
  *
  * Middleware registration order matters:
- *   1. Body parsing — must come before any route that reads req.body.
- *   2. Request logging — as early as possible so every request is captured.
+ *   1. Request logging — before parsing so malformed requests are captured.
+ *   2. Body parsing — must come before any route that reads req.body.
  *   3. Routes — the actual application endpoints.
  *   4. 404 handler — catches any request that did not match a route.
  *   5. Error handler — must be LAST; Express identifies it by its 4-arg signature.
@@ -32,13 +32,15 @@ const healthRoutes   = require('./routes/health.routes');
 
 const app = express();
 
+// ── Request logging ────────────────────────────────────────────────────────
+// Register before body parsing so malformed and oversized JSON requests are
+// captured too.
+app.use(requestLogger);
+
 // ── Body parsing ───────────────────────────────────────────────────────────
 // Parse JSON request bodies. We enforce a maximum size here to guard
 // against accidental or malicious oversized payloads.
 app.use(express.json({ limit: config.maxPayloadBytes }));
-
-// ── Request logging ────────────────────────────────────────────────────────
-app.use(requestLogger);
 
 // ── Static files (frontend dashboard) ─────────────────────────────────────
 // Serving the public/ directory directly from Express is fine for

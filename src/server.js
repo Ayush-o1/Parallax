@@ -20,9 +20,11 @@
 
 'use strict';
 
-const app    = require('./app');
 const config = require('./config/env');
 const logger = require('./utils/logger');
+
+config.validateConfig();
+const app = require('./app');
 
 const server = app.listen(config.port, () => {
   logger.info('parallax server started', {
@@ -44,36 +46,59 @@ server.on('error', (err) => {
 
 // ── Graceful shutdown ──────────────────────────────────────────────────────
 
-function shutdown(signal) {
+let shuttingDown = false;
+function shutdown(signal, exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info(`${signal} received, shutting down gracefully`);
 
-  server.close(() => {
-    logger.info('all connections closed, process exiting');
-    process.exit(0);
-  });
-
-  // Force exit if connections do not close within 10 seconds.
-  // This prevents the process from hanging indefinitely if a client
-  // keeps a connection open (e.g. long-polling or a keep-alive socket).
-  setTimeout(() => {
+  const forceExitTimer = setTimeout(() => {
     logger.warn('forced shutdown after timeout');
     process.exit(1);
   }, 10_000);
+  forceExitTimer.unref();
+
+  server.close(() => {
+    clearTimeout(forceExitTimer);
+    logger.info('all connections closed, process exiting');
+    process.exit(exitCode);
+  });
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 
 // Catch unhandled promise rejections at the process level.
-// This should not happen if every async function is wrapped in try/catch,
-// but it provides a safety net and prevents silent failures in Node 24.
+//
+// Policy: log the rejection clearly, then EXIT.
+//
+// Why exit instead of continue?
+//   Node.js emits 'unhandledRejection' when a rejected promise has no
+//   .catch() handler. In Node 15+, the default behaviour is already to
+//   exit with code 1. We make this explicit and controlled:
+//
+//   1. An unhandled rejection almost always means we are in an unknown
+//      state (e.g. a database write failed silently, a lock was not
+//      released). Continuing to serve traffic in an unknown state is
+//      more dangerous than restarting cleanly.
+//
+//   2. Process managers (Docker restart policy, PM2, systemd) will
+//      restart the process automatically, so an exit is a recoverable
+//      event rather than a permanent outage.
+//
+//   3. The 'do not exit' strategy was appropriate when unhandled
+//      rejections were less dangerous, but it masks bugs. We want
+//      loud failures during development.
+//
+//   Exception: the 'close' event timeout timer created by shutdown()
+//   is intentionally unguarded; if it fires it calls process.exit()
+//   directly, so it never reaches this handler.
 process.on('unhandledRejection', (reason) => {
-  logger.error('unhandled promise rejection', {
+  logger.error('unhandled promise rejection — shutting down', {
     reason: reason instanceof Error ? reason.message : String(reason),
+    ...(reason instanceof Error && config.isDevelopment() && { stack: reason.stack }),
   });
-  // Do not exit — one unhandled rejection should not kill the server.
-  // In Phase 10 (workers), worker processes should exit on unhandled
-  // rejections because a crashed worker needs to be restarted cleanly.
+  shutdown('unhandled promise rejection', 1);
 });
 
 module.exports = server; // Exported for testing convenience.
