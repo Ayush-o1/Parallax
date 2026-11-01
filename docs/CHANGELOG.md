@@ -6,6 +6,19 @@ Format: `[version] — date`
 
 ---
 
+## [0.2.0] — 2026-11-01
+
+### Changed
+- Completed the Phase 1 design review and clarified timestamp acceptance rules.
+- Separated vehicle identity from OEM Gamma event identity.
+- Made engine state and acceleration optional canonical measurements.
+- Documented telemetry cadence limits for stale detection and hard-braking inference.
+- Specified test database isolation, startup configuration validation, and request logging behavior.
+- Added ADR-003 through ADR-005 for stale detection, quarantine relationships, and odometer regressions.
+- Prepared Phase 2 for schema review before implementation.
+
+---
+
 ## [0.1.0] — 2026-11-01
 
 ### Added

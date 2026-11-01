@@ -1,7 +1,7 @@
 # Parallax — Project Status
 
 **Last updated:** 2026-11-01  
-**Current phase:** Phase 1 complete → Phase 2 starting
+**Current phase:** Phase 2 database design — review pending
 
 ---
 
@@ -28,29 +28,32 @@
 ---
 
 ### ✅ Phase 1 — Requirements, Architecture, Data Contracts
-**Commit:** (pending — next commit)  
+**Commit:** `5419ea7` (design review completion: `010327b`)  
 **Branch:** `main`
+**Pushed:** Yes
 
 **Delivered:**
-- `docs/requirements.md` — 40 functional + 20 non-functional requirements
+- `docs/requirements.md` — 44 functional + 22 non-functional requirements
 - `docs/architecture.md` — layer diagram, ingestion flow, module map, technology decisions
 - `docs/data-contracts.md` — 3 OEM payload schemas, canonical schema, unit conversion rules, timestamp semantics, quarantine reason codes
 - `docs/decisions/ADR-001-modular-monolith.md`
 - `docs/decisions/ADR-002-database-idempotency.md`
+- `docs/decisions/ADR-003-stale-vehicle-detection.md`
+- `docs/decisions/ADR-004-nullable-quarantine-fk.md`
+- `docs/decisions/ADR-005-odometer-regression.md`
+- Environment isolation and configuration tests
 
 ---
 
 ## Current Phase: Phase 2 — Database Design and Persistence Foundation
 
-**Objective:** Implement the initial PostgreSQL schema via Prisma.
+**Objective:** Review and approve the initial PostgreSQL schema proposal before implementation.
 
 **Upcoming tasks:**
-1. Configure Prisma with `DATABASE_URL`
-2. Design core entities: Vehicle, IngestionEvent, TelemetryReading, VehicleState, QuarantineRecord
-3. Add relationships, foreign keys, unique constraints, indexes
-4. Run migrations
-5. Write seed data
-6. Test constraints with integration tests
+1. Review the entity and relationship proposal
+2. Confirm constraints, indexes, transaction boundaries, and raw payload handling
+3. After approval, configure Prisma with isolated development and test databases
+4. Implement migrations, seed data, and integration tests
 
 ---
 
@@ -74,6 +77,9 @@
 |----------|-----|
 | Modular monolith over microservices | ADR-001 |
 | Database-level idempotency | ADR-002 |
+| Per-OEM stale detection | ADR-003 |
+| Nullable vehicle relation for quarantine | ADR-004 |
+| Quarantine and flag odometer regressions | ADR-005 |
 
 ---
 
