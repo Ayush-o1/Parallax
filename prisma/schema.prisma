@@ -28,7 +28,7 @@ enum IngestionEventStatus {
 }
 
 model Organization {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   slug      String   @unique @db.VarChar(100)
   name      String   @db.VarChar(200)
   isDemo    Boolean  @default(false) @map("is_demo")
@@ -42,7 +42,7 @@ model Organization {
 }
 
 model Vehicle {
-  id             String   @id @default(uuid()) @db.Uuid
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String   @map("organization_id") @db.Uuid
   vin            String   @db.VarChar(32)
   source         String   @db.Text
@@ -61,7 +61,7 @@ model Vehicle {
 }
 
 model IngestionRequest {
-  id             String                 @id @default(uuid()) @db.Uuid
+  id             String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String                 @map("organization_id") @db.Uuid
   source         String                 @db.Text
   rawBody        Bytes                  @map("raw_body") @db.ByteA
@@ -83,7 +83,7 @@ model IngestionRequest {
 }
 
 model IngestionEvent {
-  id              String               @id @default(uuid()) @db.Uuid
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   requestId       String               @map("request_id") @db.Uuid
   ordinal         Int
   source          String               @db.Text
@@ -106,7 +106,7 @@ model IngestionEvent {
 }
 
 model TelemetryReading {
-  id                 String   @id @default(uuid()) @db.Uuid
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ingestionEventId   String   @unique @map("ingestion_event_id") @db.Uuid
   vehicleId          String   @map("vehicle_id") @db.Uuid
   source             String   @db.VarChar(100)
@@ -135,7 +135,7 @@ model TelemetryReading {
 }
 
 model VehicleState {
-  id                String   @id @default(uuid()) @db.Uuid
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   vehicleId         String   @unique @map("vehicle_id") @db.Uuid
   latestReadingId   String   @unique @map("latest_reading_id") @db.Uuid
   lastEventTime     DateTime @map("last_event_time") @db.Timestamptz(6)
@@ -149,7 +149,7 @@ model VehicleState {
 }
 
 model QuarantineRecord {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   requestId String   @map("request_id") @db.Uuid
   eventId   String?  @map("event_id") @db.Uuid
   vehicleId String?  @map("vehicle_id") @db.Uuid
@@ -171,7 +171,7 @@ model QuarantineRecord {
 }
 
 model DerivedEvent {
-  id              String   @id @default(uuid()) @db.Uuid
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   vehicleId       String   @map("vehicle_id") @db.Uuid
   sourceReadingId String?  @map("source_reading_id") @db.Uuid
   eventType       String   @map("event_type") @db.VarChar(100)

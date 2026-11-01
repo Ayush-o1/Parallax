@@ -4,6 +4,9 @@ const { PrismaClient } = require('@prisma/client');
 const config = require('../src/config/env');
 
 config.validateConfig();
+// Prisma reads DATABASE_URL directly. Keep CLI seeding on the same validated
+// target selected by config, especially when NODE_ENV=test.
+process.env.DATABASE_URL = config.databaseUrl;
 
 const prisma = new PrismaClient();
 

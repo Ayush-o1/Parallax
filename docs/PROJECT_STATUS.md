@@ -1,7 +1,7 @@
 # Parallax — Project Status
 
 **Last updated:** 2026-11-01  
-**Current phase:** Phase 2 — Prisma schema foundation complete
+**Current phase:** Phase 3 — Vehicle management API
 
 ---
 
@@ -47,24 +47,24 @@
 
 ## Current Phase: Phase 2 — Database Design and Persistence Foundation
 
-**Objective:** Implement the documented Prisma persistence foundation. The schema and idempotent seed are ready; no migration has been created or applied yet.
+**Objective:** Establish the PostgreSQL persistence foundation. The initial migration is applied to both isolated local databases.
 
 **Delivered:**
 - `docs/decisions/ADR-006-ingestion-lifecycle-and-derived-event-idempotency.md`
-- `prisma/schema.prisma` — UUID and PostgreSQL types, ingestion lifecycle, and idempotency constraints
-- `prisma/seed.js` — idempotent `demo` organization seed
+- `prisma/schema.prisma` and `prisma/migrations/20261101130000_init/migration.sql` — database UUID defaults, PostgreSQL types, ingestion lifecycle, constraints, indexes, and CHECK constraints
+- `prisma/seed.js` — idempotent `demo` organization seed; applied to development and test databases
+- Six PostgreSQL integration tests covering raw bytes/JSONB, relations, constraints, concurrent duplicate inserts, quarantine, and rollback
 
 **Upcoming tasks:**
-1. Review the Prisma schema and generated migration plan
-2. Create and apply the initial migration against `parallax_dev`
-3. Run the idempotent demo organization seed
-4. Add integration tests against `parallax_test` for constraints, transactions, and concurrency
+1. Implement vehicle registration/list/detail APIs scoped to the demo organization
+2. Add API and service tests
+3. Continue into OEM simulators and adapters
 
 ---
 
 ## Known Issues
 
-- No migrations or PostgreSQL integration tests exist yet; the schema has only been validated with Prisma tooling.
+- Docker CLI is installed but the Docker daemon is not running in this environment; local PostgreSQL 18.6 is available.
 
 ---
 
@@ -72,7 +72,7 @@
 
 | Version | Change | Migration |
 |---------|--------|-----------|
-| Schema draft | Prisma schema created and validated; migration pending | — |
+| `20261101130000_init` | Initial Prisma schema, constraints, indexes, and UUID defaults | Applied to `parallax_dev` and `parallax_test` |
 
 ---
 

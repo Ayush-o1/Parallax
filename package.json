@@ -9,16 +9,17 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "NODE_ENV=test node --test --import ./tests/setup.js tests/**/*.test.js",
+    "test": "npm run test:integration && npm run test:api && npm run test:unit",
     "test:unit": "NODE_ENV=test node --test --import ./tests/setup.js tests/unit/**/*.test.js",
-    "test:integration": "NODE_ENV=test node --test --import ./tests/setup.js tests/integration/**/*.test.js",
+    "test:integration": "NODE_ENV=test node scripts/prisma-command.js migrate deploy && NODE_ENV=test node scripts/prisma-command.js db seed && NODE_ENV=test node --test --import ./tests/setup.js tests/integration/**/*.test.js",
     "test:api": "NODE_ENV=test node --test --import ./tests/setup.js tests/api/**/*.test.js",
-    "db:migrate": "prisma migrate dev",
-    "db:migrate:prod": "prisma migrate deploy",
+    "db:migrate": "node scripts/prisma-command.js migrate dev",
+    "db:migrate:test": "NODE_ENV=test node scripts/prisma-command.js migrate deploy",
+    "db:migrate:prod": "NODE_ENV=production node scripts/prisma-command.js migrate deploy",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:seed": "prisma db seed",
-    "db:reset": "prisma migrate reset --force"
+    "db:seed": "node scripts/prisma-command.js db seed",
+    "db:seed:test": "NODE_ENV=test node scripts/prisma-command.js db seed"
   },
   "dependencies": {
     "@prisma/client": "^6.9.0",

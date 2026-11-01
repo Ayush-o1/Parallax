@@ -425,7 +425,7 @@ The first valid reading establishes a baseline if none exists. A legitimate corr
 
 ## 13. Database Persistence Design
 
-This design is documented before Prisma models are created. Primary and foreign keys are PostgreSQL UUIDs. All timestamps use `TIMESTAMPTZ(6)`, measurements use bounded `DECIMAL(p,s)`, request bodies use `BYTEA`, and successfully parsed payloads use `JSONB`. Incoming `source` values use strings rather than a closed enum.
+This design is documented before Prisma models are created. Primary and foreign keys are PostgreSQL UUIDs with database-side `gen_random_uuid()` defaults. The initial migration adds database `CHECK` constraints for canonical ranges so Prisma and raw SQL paths enforce the same rules. All timestamps use `TIMESTAMPTZ(6)`, measurements use bounded `DECIMAL(p,s)`, request bodies use `BYTEA`, and successfully parsed payloads use `JSONB`. Incoming `source` values use strings rather than a closed enum.
 
 ### Entities and relationships
 

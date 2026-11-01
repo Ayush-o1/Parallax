@@ -175,15 +175,21 @@ function validateConfig() {
   }
 
   const activeDatabaseUrl = isTestEnv ? config.testDatabaseUrl : config.databaseUrl;
-  const expectedDatabase = isTestEnv ? 'parallax_test' : 'parallax_dev';
+  const expectedDatabase = isTestEnv
+    ? 'parallax_test'
+    : config.isProduction() ? undefined : 'parallax_dev';
+  const variableName = isTestEnv ? 'TEST_DATABASE_URL' : 'DATABASE_URL';
   let parsedDatabaseUrl;
   try {
     parsedDatabaseUrl = new URL(activeDatabaseUrl);
   } catch {
-    throw new Error(`${isTestEnv ? 'TEST_DATABASE_URL' : 'DATABASE_URL'} must be a valid PostgreSQL URL for ${expectedDatabase}.`);
+    throw new Error(`${variableName} must be a valid PostgreSQL URL${expectedDatabase ? ` for ${expectedDatabase}` : ''}.`);
   }
-  if (!['postgres:', 'postgresql:'].includes(parsedDatabaseUrl.protocol) || parsedDatabaseUrl.pathname.slice(1) !== expectedDatabase) {
-    throw new Error(`${isTestEnv ? 'TEST_DATABASE_URL' : 'DATABASE_URL'} must point exclusively to the ${expectedDatabase} database.`);
+  if (!['postgres:', 'postgresql:'].includes(parsedDatabaseUrl.protocol)) {
+    throw new Error(`${variableName} must use the PostgreSQL protocol.`);
+  }
+  if (expectedDatabase && parsedDatabaseUrl.pathname.slice(1) !== expectedDatabase) {
+    throw new Error(`${variableName} must point exclusively to the ${expectedDatabase} database.`);
   }
 
   const positiveSettings = {

@@ -203,7 +203,7 @@ Request and event status values are defined in ADR-006 and `docs/data-contracts.
 
 ### Types and organization ownership
 
-All primary and foreign identifiers use PostgreSQL UUID. Original request bodies use `BYTEA`; parsed JSON uses nullable `JSONB`; normalized measurements use bounded `DECIMAL(p,s)`; event, receipt, and detection times use `TIMESTAMPTZ`. Source identifiers remain strings so unknown OEM values can be preserved.
+All primary and foreign identifiers use PostgreSQL UUID with database-side `gen_random_uuid()` defaults so raw SQL writes remain safe. The migration adds explicit PostgreSQL `CHECK` constraints for speed, fuel, location, odometer, non-empty stable event IDs, and non-negative batch ordinals. Original request bodies use `BYTEA`; parsed JSON uses nullable `JSONB`; normalized measurements use bounded `DECIMAL(p,s)`; event, receipt, and detection times use `TIMESTAMPTZ`. Source identifiers remain strings so unknown OEM values can be preserved.
 
 Every vehicle and ingestion request has a required organization FK. Unauthenticated local development uses a seeded organization with slug `demo`. The request is attributed to that organization for quarantine and audit queries. Authentication must derive organization ownership from verified credentials; clients cannot choose an arbitrary organization ID.
 

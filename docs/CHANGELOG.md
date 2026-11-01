@@ -9,13 +9,15 @@ Format: `[version] — date`
 ## [0.3.0] — 2026-11-01
 
 ### Added
-- Phase 2 Prisma schema with separate request and event records, UUIDs, PostgreSQL-native data types, per-vehicle idempotency, and deterministic derived-event keys.
-- Idempotent seed for the local `demo` organization.
+- Phase 2 Prisma schema and initial migration with separate request/event records, database-generated UUIDs, PostgreSQL-native data types, per-vehicle idempotency, deterministic derived-event keys, and CHECK constraints.
+- Idempotent seed for the local `demo` organization, applied to the isolated development and test databases.
+- Six PostgreSQL integration tests for persistence, constraints, concurrent duplicates, quarantine relationships, and transaction rollback.
 - ADR-006 for durable ingestion lifecycle and transaction boundaries.
 
 ### Changed
 - Refined organization ownership, concurrency-safe state upserts, and event-time-aware odometer regression handling.
 - Documented request/event status lifecycle, unique constraints, and indexes.
+- Added guarded Prisma command wrappers so test migrations and seeds select `parallax_test`; removed the unsafe forced-reset script.
 
 ---
 
