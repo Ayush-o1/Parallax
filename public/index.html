@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parallax — Vehicle Telemetry Platform</title>
+  <style>
+    /* Minimal placeholder styles — full dashboard CSS comes in Phase 11 */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8f9fa;
+      color: #1a1a2e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 48px 64px;
+      text-align: center;
+      max-width: 480px;
+    }
+    h1 { font-size: 1.75rem; font-weight: 700; margin: 0 0 8px; }
+    p  { color: #64748b; margin: 0 0 24px; font-size: 0.95rem; }
+    .badge {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      border-radius: 4px;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+    .status { margin-top: 24px; font-size: 0.85rem; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Parallax</h1>
+    <p>Multi-OEM Vehicle Telemetry Normalization &amp; Event Processing Platform</p>
+    <span class="badge">Phase 0 — Foundation</span>
+    <div class="status" id="status">Checking API&hellip;</div>
+  </div>
+
+  <script>
+    // A minimal liveness check so you can confirm the server and frontend
+    // are wired together correctly. Full dashboard JS arrives in Phase 11.
+    fetch('/health')
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('status').textContent =
+          `API status: ${data.data.status} · uptime ${data.data.uptimeSeconds}s`;
+      })
+      .catch(() => {
+        document.getElementById('status').textContent = 'API unreachable';
+      });
+  </script>
+</body>
+</html>
