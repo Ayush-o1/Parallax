@@ -7,7 +7,7 @@ const { registry } = require('../middleware/requestMetrics');
 
 function authorized(request) {
   if (!config.isProduction()) return true;
-  const expected = process.env.METRICS_TOKEN || '';
+  const expected = config.metricsToken || '';
   const supplied = request.headers.authorization?.replace(/^Bearer\s+/i, '') || '';
   const expectedBytes = Buffer.from(expected);
   const suppliedBytes = Buffer.from(supplied);

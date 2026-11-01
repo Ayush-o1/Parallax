@@ -6,9 +6,10 @@ const rawBodyCapture = require('../middleware/rawBodyCapture');
 const ingestController = require('../controllers/ingest.controller');
 const organizationContext = require('../middleware/organizationContext');
 const asyncHandler = require('../utils/asyncHandler');
+const requireRole = require('../middleware/requireRole');
 
 const router = Router();
-router.post('/:source', organizationContext,
+router.post('/:source', organizationContext, requireRole('INGESTOR', 'ADMIN'),
   rawBodyCapture(config.maxPayloadBytes),
   asyncHandler(ingestController.ingest));
 

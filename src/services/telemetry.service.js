@@ -155,6 +155,20 @@ async function history(organizationId, query) {
   return { items, page: { limit, hasMore, nextCursor: hasMore ? rows.at(-1).id : null } };
 }
 
+async function ingestionDetail(organizationId, requestId) {
+  if (!UUID.test(requestId)) throw new AppError(400, 'INVALID_REQUEST_ID', 'requestId must be a UUID.');
+  const row = await prisma.ingestionRequest.findFirst({
+    where: { id: requestId, organizationId },
+    include: {
+      events: { orderBy: { ordinal: 'asc' }, include: { quarantineRecords: true, telemetryReading: true } },
+      quarantineRecords: { orderBy: { createdAt: 'asc' } },
+    },
+  });
+  if (!row) throw new AppError(404, 'INGESTION_REQUEST_NOT_FOUND', 'Ingestion request not found.');
+  const raw = Buffer.from(row.rawBody);
+  return { ...row, rawBody: undefined, rawRequestBody: raw.toString('utf8'), rawRequestBase64: raw.toString('base64') };
+}
+
 async function quarantines(organizationId, query) {
   const limit = parseLimit(query.limit);
   parseCursor(query.cursor);
@@ -177,4 +191,4 @@ async function quarantines(organizationId, query) {
   };
 }
 
-module.exports = { events, history, quarantines, recentEvents, recentReadings, state, summary, telemetry };
+module.exports = { events, history, ingestionDetail, quarantines, recentEvents, recentReadings, state, summary, telemetry };

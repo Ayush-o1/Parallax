@@ -83,10 +83,10 @@ services:
   app:
     build: .
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
-      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-local-compose-signing-secret-please-change-before-deployment}
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: redpanda:9092
@@ -99,7 +99,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -108,9 +108,9 @@ services:
     build: .
     command: ["node", "scripts/worker.js"]
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
-      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-local-compose-signing-secret-please-change-before-deployment}
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       REDIS_URL: redis://redis:6379
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-16}
@@ -128,9 +128,9 @@ services:
     build: .
     command: ["node", "scripts/streaming.js"]
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
-      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-local-compose-signing-secret-please-change-before-deployment}
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       KAFKA_BROKERS: redpanda:9092
       KAFKA_PARTITIONS: 3

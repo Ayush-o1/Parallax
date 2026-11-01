@@ -153,6 +153,24 @@ describe('config/env — isolation and validation', () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /PORT/);
   });
+
+  it('requires explicit streaming configuration in production', () => {
+    const result = spawnSync(process.execPath, ['-e', `
+      process.env.NODE_ENV = 'production';
+      process.env.DATABASE_URL = 'postgresql://app:secret@db.example.test/parallax';
+      process.env.REDIS_URL = 'rediss://queue.example.test:6379';
+      process.env.TOKEN_SIGNING_SECRET = 'production-signing-secret-that-is-long-enough';
+      process.env.METRICS_TOKEN = 'production-metrics-token-that-is-long-enough';
+      delete process.env.STREAMING_ENABLED;
+      require('./src/config/env').validateConfig();
+    `], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { ...process.env, DOTENV_CONFIG_PATH: '/dev/null' },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /STREAMING_ENABLED/);
+  });
 });
 
 describe('config/env — timestamp acceptance window', () => {

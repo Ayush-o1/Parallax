@@ -13,7 +13,8 @@ const baseUrl = process.env.BENCH_URL || 'http://localhost:3000';
 const targetEvents = Number(process.env.BENCH_EVENTS || 1000);
 const concurrency = Number(process.env.BENCH_CONCURRENCY || 16);
 const groupSize = Number(process.env.BENCH_BATCH_SIZE || 25);
-const samples = { direct: [], batch: [], duplicate: [], reads: [] };
+const samples = { direct: [], batch: [], duplicate: [], vehicleList: [], vehicleDetail: [], overview: [], reads: [] };
+const requestCounts = { total: 0, successful: 0, failed: 0 };
 const requestIds = [];
 const chars = 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789';
 const vin = [...crypto.randomBytes(17)].map((byte) => chars[byte % chars.length]).join('');
@@ -28,6 +29,9 @@ async function call(url, { token, method = 'GET', body } = {}) {
   const started = performance.now();
   const response = await fetch(`${baseUrl}${url}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const result = await response.json();
+  requestCounts.total += 1;
+  if (response.ok) requestCounts.successful += 1;
+  else requestCounts.failed += 1;
   return { status: response.status, result, ms: performance.now() - started };
 }
 
@@ -50,6 +54,7 @@ async function run() {
   const client = await prisma.apiClient.create({ data: {
     organizationId: organization.id, name: 'temporary benchmark client', clientId,
     secretHash: await bcrypt.hash(clientSecret, 4),
+    role: 'ADMIN',
   } });
   let vehicle;
   try {
@@ -57,7 +62,7 @@ async function run() {
     if (auth.status !== 200) throw new Error(`Auth failed: ${auth.status}`);
     const token = auth.result.data.access_token;
     const created = await call('/api/v1/vehicles', { token, method: 'POST', body: { vin, source: 'OEM_ALPHA' } });
-    if (created.status !== 201) throw new Error(`Vehicle registration failed: ${created.status}`);
+    if (created.status !== 201) throw new Error(`Vehicle registration failed: ${created.status} ${JSON.stringify(created.result.error || {})}`);
     vehicle = await prisma.vehicle.findFirstOrThrow({ where: { organizationId: organization.id, vin } });
     const baseTime = Date.now() - 10_000;
 
@@ -105,6 +110,17 @@ async function run() {
       if (result.status !== 200) throw new Error(`History read failed: ${result.status}`);
       cursor = result.result.page.nextCursor;
       if (!cursor) break;
+    }
+    for (let sample = 0; sample < 20; sample += 1) {
+      const list = await call('/api/v1/vehicles?limit=50', { token });
+      if (list.status !== 200) throw new Error(`Vehicle list failed: ${list.status}`);
+      samples.vehicleList.push(list.ms);
+      const detail = await call(`/api/v1/vehicles/${vehicle.id}`, { token });
+      if (detail.status !== 200) throw new Error(`Vehicle detail failed: ${detail.status}`);
+      samples.vehicleDetail.push(detail.ms);
+      const summary = await call('/api/v1/summary', { token });
+      if (summary.status !== 200) throw new Error(`Dashboard overview failed: ${summary.status}`);
+      samples.overview.push(summary.ms);
     }
 
     const startedAt = Date.now();
@@ -164,7 +180,15 @@ async function run() {
       workload: {
         directEvents: targetEvents, batchEvents: targetEvents, batchSize: groupSize, concurrency, vehicleCount: 1,
         workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 8),
+        apiRateLimitPerMinute: Number(process.env.API_RATE_LIMIT_PER_MINUTE || 1200),
       },
+      runtime: {
+        appDeployment: process.env.BENCH_DEPLOYMENT || 'local Docker Compose',
+        database: 'containerized PostgreSQL',
+        queue: process.env.REDIS_URL ? 'containerized Redis + BullMQ worker' : 'synchronous (Redis disabled)',
+        streaming: process.env.KAFKA_BROKERS ? 'containerized Redpanda/Kafka' : 'disabled',
+      },
+      requests: requestCounts,
       ingestionMode: process.env.REDIS_URL ? 'asynchronous (Redis/BullMQ)' : 'synchronous',
       metrics: Object.fromEntries(Object.entries(samples).map(([name, values]) => [name, {
         samples: values.length,
@@ -180,7 +204,8 @@ async function run() {
       kafkaInboxRows: await prisma.kafkaInbox.groupBy({ by: ['consumerGroup'], where: { eventKey: { contains: vehicle.id } }, _count: { _all: true } })
         .then((rows) => Object.fromEntries(rows.map((row) => [row.consumerGroup, row._count._all]))),
       ingestionStatusCounts,
-      errorRate: eventCount ? Number((unsuccessfulCount / eventCount).toFixed(6)) : 0,
+      errorRate: requestCounts.total ? Number((requestCounts.failed / requestCounts.total).toFixed(6)) : 0,
+      rejectedEventRate: eventCount ? Number((unsuccessfulCount / eventCount).toFixed(6)) : 0,
       requestCompletionMs: {
         samples: requestCompletion.length,
         mean: requestCompletion.length ? Number((requestCompletion.reduce((a, b) => a + b, 0) / requestCompletion.length).toFixed(2)) : null,
@@ -188,29 +213,52 @@ async function run() {
       },
       queryPlan: plan.map((line) => Object.values(line)[0]),
     };
-    const reportPath = path.join(process.cwd(), 'docs', 'benchmarks', `benchmark-${targetEvents}-${new Date().toISOString().slice(0, 10)}.json`);
+    const runLabel = (process.env.BENCH_LABEL || 'run').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+    const runTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const reportPath = process.env.BENCH_REPORT_PATH || path.join(process.cwd(), 'docs', 'benchmarks', `benchmark-${targetEvents}-${new Date().toISOString().slice(0, 10)}-${runLabel}-${runTimestamp}.json`);
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
     await fs.writeFile(reportPath, `${JSON.stringify(result, null, 2)}\n`);
     process.stdout.write(`${JSON.stringify({ reportPath, result }, null, 2)}\n`);
   } finally {
-    if (vehicle) {
-      await prisma.outboxEvent.deleteMany({ where: { vehicleId: vehicle.id } });
-      await prisma.derivedEvent.deleteMany({ where: { vehicleId: vehicle.id } });
-      await prisma.quarantineRecord.deleteMany({ where: { vehicleId: vehicle.id } });
-      await prisma.vehicleState.deleteMany({ where: { vehicleId: vehicle.id } });
-      await prisma.telemetryReading.deleteMany({ where: { vehicleId: vehicle.id } });
-      await prisma.vehicle.delete({ where: { id: vehicle.id } });
+    try {
+      const cleanupDeadline = Date.now() + 120_000;
+      let pending = await prisma.ingestionRequest.count({
+        where: { organizationId: organization.id, status: { in: ['RECEIVED', 'PROCESSING'] } },
+      });
+      while (pending && Date.now() < cleanupDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        pending = await prisma.ingestionRequest.count({
+          where: { organizationId: organization.id, status: { in: ['RECEIVED', 'PROCESSING'] } },
+        });
+      }
+      if (pending) {
+        process.stderr.write('Benchmark fixture retained because ingestion was still processing during cleanup.\n');
+        process.exitCode = 1;
+      } else {
+        if (vehicle) {
+          await prisma.outboxEvent.deleteMany({ where: { vehicleId: vehicle.id } });
+          await prisma.derivedEvent.deleteMany({ where: { vehicleId: vehicle.id } });
+          await prisma.quarantineRecord.deleteMany({ where: { vehicleId: vehicle.id } });
+          await prisma.vehicleState.deleteMany({ where: { vehicleId: vehicle.id } });
+          await prisma.telemetryReading.deleteMany({ where: { vehicleId: vehicle.id } });
+        }
+        const benchRequests = await prisma.ingestionRequest.findMany({ where: { organizationId: organization.id }, select: { id: true } });
+        const allRequestIds = benchRequests.map((row) => row.id);
+        if (allRequestIds.length) {
+          await prisma.quarantineRecord.deleteMany({ where: { requestId: { in: allRequestIds } } });
+          await prisma.ingestionEvent.deleteMany({ where: { requestId: { in: allRequestIds } } });
+          await prisma.ingestionRequest.deleteMany({ where: { id: { in: allRequestIds } } });
+        }
+        if (vehicle) await prisma.vehicle.delete({ where: { id: vehicle.id } });
+        await prisma.apiClient.delete({ where: { id: client.id } });
+        await prisma.organization.delete({ where: { id: organization.id } });
+      }
+    } catch (error) {
+      process.stderr.write(`Benchmark cleanup failed: ${error.message}\n`);
+      process.exitCode = 1;
+    } finally {
+      await prisma.$disconnect();
     }
-    const benchRequests = await prisma.ingestionRequest.findMany({ where: { organizationId: organization.id }, select: { id: true } });
-    const allRequestIds = benchRequests.map((row) => row.id);
-    if (allRequestIds.length) {
-      await prisma.quarantineRecord.deleteMany({ where: { requestId: { in: allRequestIds } } });
-      await prisma.ingestionEvent.deleteMany({ where: { requestId: { in: allRequestIds } } });
-      await prisma.ingestionRequest.deleteMany({ where: { id: { in: allRequestIds } } });
-    }
-    await prisma.apiClient.delete({ where: { id: client.id } });
-    await prisma.organization.delete({ where: { id: organization.id } });
-    await prisma.$disconnect();
   }
 }
 

@@ -1,7 +1,8 @@
 # Environment — NEVER commit secrets
 .env
 .env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Dependencies
 node_modules/
@@ -28,6 +29,8 @@ Thumbs.db
 # Test output
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
 
 # Build artifacts (none currently, kept for future)
 dist/

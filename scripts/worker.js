@@ -10,7 +10,7 @@ config.validateConfig();
 let stop;
 startWorker().then((shutdown) => {
   stop = shutdown;
-  const stopMetrics = startMetricsServer({ port: Number(process.env.WORKER_METRICS_PORT || 9465) });
+  const stopMetrics = startMetricsServer({ port: config.workerMetricsPort });
   const exit = async (signal) => {
     logger.info(`${signal} received by worker`);
     await Promise.all([stop(), stopMetrics()]);

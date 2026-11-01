@@ -1,6 +1,7 @@
 'use strict';
 
 const prisma = require('../db/prisma');
+const config = require('../config/env');
 const AppError = require('../utils/AppError');
 
 /**
@@ -9,7 +10,7 @@ const AppError = require('../utils/AppError');
  * installed in Phase 9.
  */
 async function demoOrganization(req, res, next) {
-  if (process.env.NODE_ENV === 'production') {
+  if (config.isProduction()) {
     return next(new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required.'));
   }
 

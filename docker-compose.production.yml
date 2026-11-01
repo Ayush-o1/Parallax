@@ -1,0 +1,105 @@
+# Docker alternative for a single-host demo. Keep this host private and protect
+# the Docker daemon. PostgreSQL and Redis have no published ports. Streaming is
+# explicitly off; use Render or another managed broker before enabling Kafka.
+name: parallax-production
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/parallax
+  TEST_DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/parallax_test
+  REDIS_URL: redis://redis:6379
+  TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:?set TOKEN_SIGNING_SECRET}
+  METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
+  STREAMING_ENABLED: "false"
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+  TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+  API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-1200}
+  TOKEN_RATE_LIMIT: ${TOKEN_RATE_LIMIT:-20}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: parallax_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: parallax
+    volumes:
+      - production-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parallax_app -d parallax"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - production-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    command: ["node", "scripts/prisma-command.js", "migrate", "deploy"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    build: .
+    command: ["node", "scripts/prisma-command.js", "db", "seed"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  web:
+    build: .
+    command: ["node", "src/server.js"]
+    environment:
+      <<: *app-env
+      PORT: 3000
+    ports:
+      - "${PUBLIC_PORT:-3000}:3000"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["node", "scripts/worker.js"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "scripts/check-worker.js"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  production-postgres-data:
+  production-redis-data:

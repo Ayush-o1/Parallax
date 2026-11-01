@@ -32,6 +32,9 @@ config.validateConfig();
 const app = require('./app');
 
 const server = http.createServer(app);
+server.requestTimeout = config.requestTimeoutMs;
+server.headersTimeout = config.headersTimeoutMs;
+server.keepAliveTimeout = 5_000;
 const io = new SocketServer(server, { cors: { origin: false }, serveClient: true });
 io.use(socketAuth);
 io.on('connection', (socket) => {

@@ -88,6 +88,7 @@ Supported event outcomes are `ACCEPTED`, `ACCEPTED_WITH_WARNINGS`, `QUARANTINED`
 | `GET /api/v1/telemetry/recent?limit=10&cursor=<uuid>` | Recent normalized telemetry across the authenticated organization, with vehicle identifiers. |
 | `GET /api/v1/events/recent?limit=8&cursor=<uuid>` | Recent operational events across the authenticated organization, with vehicle identifiers. |
 | `GET /api/v1/ingestions?limit=50&cursor=<uuid>&status=PROCESSING` | Tenant-scoped request lifecycle, child counts, and event outcomes grouped by status. |
+| `GET /api/v1/ingestions/:requestId` | Tenant-scoped receipt detail, extracted event outcomes, quarantine details, and exact original body in UTF-8/Base64. |
 | `GET /api/v1/quarantine?limit=50&cursor=<uuid>&reason=VIN` | Request/event rejection detail, parsed event payload if available, original UTF-8 request text and exact raw body Base64. Reason filtering is case-insensitive substring search. |
 | `GET /api/v1/vehicles/:vehicleId/state` | Latest event-time reading and trusted odometer. Returns `data: null` before the first accepted reading. |
 | `GET /api/v1/vehicles/:vehicleId/telemetry?from=<ISO>&to=<ISO>&limit=50&cursor=<uuid>` | Event-time descending historical page. From/to are inclusive. |
@@ -98,5 +99,7 @@ All routes verify vehicle ownership before reading state/history. Limits are 1â€
 ## Operational endpoints
 
 - `GET /health` returns liveness status and process uptime.
+- `GET /health/live` is a process-only liveness probe; `GET /health/ready` checks database/Redis and the production worker heartbeat.
 - `GET /metrics` on the API returns HTTP metrics. Compose exposes the worker metrics at `:9465/metrics` (BullMQ processing outcomes and queue delay) and stream metrics at `:9466/metrics` (outbox publication and Kafka consumer lag). Every production metrics endpoint requires the configured bearer `METRICS_TOKEN`; otherwise it returns `404`.
 - Socket.IO authenticates with handshake `{ "auth": { "token": "â€¦" } }` in production and joins only the server-resolved organization room.
+- API-client roles are `VIEWER` (read), `INGESTOR` (read and ingest), and `ADMIN` (read, ingest, and vehicle registration/update). New clients default to `VIEWER`.

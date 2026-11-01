@@ -13,12 +13,14 @@
 'use strict';
 
 const { Router } = require('express');
-const { getHealth } = require('../controllers/health.controller');
+const { getHealth, getReadiness } = require('../controllers/health.controller');
 
 const router = Router();
 
 // No authentication required — health checks must be reachable by
 // infrastructure probes that do not carry credentials.
 router.get('/', getHealth);
+router.get('/live', getHealth);
+router.get('/ready', getReadiness);
 
 module.exports = router;

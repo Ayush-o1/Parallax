@@ -20,6 +20,7 @@ async function authenticate(req) {
   }
   req.organizationId = client.organizationId;
   req.apiClientId = client.id;
+  req.apiClientRole = client.role;
   await prisma.apiClient.update({ where: { id: client.id }, data: { lastUsedAt: new Date() } });
 }
 

@@ -8,6 +8,7 @@ const { redisConnection } = require('../queues/ingestionQueue');
 const ingestionService = require('../services/ingestion.service');
 const realtimeHub = require('../realtime/hub');
 const { queueJobs, queueWait } = require('../middleware/requestMetrics');
+const Redis = require('ioredis');
 
 const QUEUE_NAME = 'parallax.ingestion';
 const DEAD_LETTER_QUEUE = 'parallax.ingestion.dead-letter';
@@ -35,7 +36,7 @@ async function detectStaleVehicles() {
           explanation: `No newer telemetry arrived within the ${interval}-second reporting threshold.`,
         }], skipDuplicates: true,
       });
-      if (inserted.count) await tx.outboxEvent.create({
+      if (inserted.count && config.streamingEnabled) await tx.outboxEvent.create({
         data: {
           organizationId: state.vehicle.organizationId,
           vehicleId: state.vehicleId,
@@ -85,13 +86,19 @@ async function recoverPending(queue) {
 
 async function startWorker() {
   if (!config.redisUrl) throw new Error('Set REDIS_URL to start the background worker.');
+  const heartbeat = new Redis(config.redisUrl, { maxRetriesPerRequest: 1, connectTimeout: 3000 });
+  const writeHeartbeat = () => heartbeat.set('parallax:worker:heartbeat', new Date().toISOString(), 'EX', 30)
+    .catch((error) => logger.warn('worker heartbeat update failed', { message: error.message }));
+  await writeHeartbeat();
+  const heartbeatTimer = setInterval(writeHeartbeat, 10_000);
+  heartbeatTimer.unref();
   const queue = new Queue(QUEUE_NAME, { connection: redisConnection() });
   const deadLetters = new Queue(DEAD_LETTER_QUEUE, { connection: redisConnection() });
   const worker = new Worker(QUEUE_NAME, async (job) => {
     queueWait.observe(Math.max(0, Date.now() - job.timestamp) / 1000);
     return ingestionService.processRequest(job.data.requestId);
   }, {
-    connection: redisConnection(), concurrency: Number(process.env.WORKER_CONCURRENCY || 8),
+    connection: redisConnection(), concurrency: config.workerConcurrency,
     lockDuration: 30_000,
   });
   worker.on('completed', (job) => {
@@ -113,9 +120,12 @@ async function startWorker() {
   logger.info('ingestion worker started', { concurrency: worker.opts.concurrency, recovered });
   return async () => {
     clearInterval(staleTimer);
+    clearInterval(heartbeatTimer);
     await worker.close();
     await queue.close();
     await deadLetters.close();
+    await heartbeat.del('parallax:worker:heartbeat');
+    await heartbeat.quit();
     await prisma.$disconnect();
   };
 }

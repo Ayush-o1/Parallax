@@ -1,44 +1,56 @@
-/**
- * src/controllers/health.controller.js
- *
- * Handles the /health endpoint.
- *
- * A health endpoint serves two audiences:
- *   1. Load balancers and orchestrators (Kubernetes, Docker) that need
- *      a quick liveness check — "is the process running?"
- *   2. Developers and monitoring tools that want basic process metadata.
- *
- * This is a liveness endpoint. Dependency health is reported by the
- * container health checks and service-specific metrics, not inferred here.
- */
-
 'use strict';
 
 const config = require('../config/env');
 const packageInfo = require('../../package.json');
+const prisma = require('../db/prisma');
+const Redis = require('ioredis');
 
-/**
- * GET /health
- *
- * Returns process liveness and basic runtime information.
- * Always returns 200 while the process is running.
- *
- * @param {import('express').Request}  req
- * @param {import('express').Response} res
- */
-function getHealth(req, res) {
-  res.status(200).json({
-    success: true,
-    data: {
-      status:    'ok',
-      service:   'parallax',
-      version:   packageInfo.version,
-      nodeEnv:   config.nodeEnv,
-      // Uptime in seconds — useful for detecting recent restarts.
-      uptimeSeconds: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString(),
-    },
+let redisClient;
+function getRedis() {
+  if (!config.redisUrl) return null;
+  if (!redisClient) redisClient = new Redis(config.redisUrl, {
+    lazyConnect: true,
+    connectTimeout: 1500,
+    maxRetriesPerRequest: 0,
+    retryStrategy: (attempt) => attempt <= 1 ? 250 : null,
   });
+  return redisClient;
 }
 
-module.exports = { getHealth };
+function getHealth(req, res) {
+  return res.status(200).json({ success: true, data: {
+    status: 'ok', service: 'parallax', version: packageInfo.version,
+    nodeEnv: config.nodeEnv, uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  } });
+}
+
+async function getReadiness(req, res) {
+  const checks = { database: 'ok' };
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch {
+    checks.database = 'unavailable';
+  }
+  const redis = getRedis();
+  if (config.isProduction() && !redis) checks.redis = 'not_configured';
+  else if (redis) {
+    try {
+      if (redis.status === 'wait' || redis.status === 'end') await redis.connect();
+      await redis.ping();
+      checks.redis = 'ok';
+      if (config.isProduction()) {
+        checks.worker = await redis.get('parallax:worker:heartbeat') ? 'ok' : 'unavailable';
+      }
+    } catch {
+      checks.redis = 'unavailable';
+    }
+  }
+  const ready = Object.values(checks).every((status) => status === 'ok');
+  return res.status(ready ? 200 : 503).json({ success: ready, data: {
+    status: ready ? 'ready' : 'not_ready', service: 'parallax', checks,
+    timestamp: new Date().toISOString(),
+  } });
+}
+
+module.exports = { getHealth, getReadiness };

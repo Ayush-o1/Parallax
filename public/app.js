@@ -2,10 +2,11 @@
 
 const state = {
   view: 'overview',
-  token: sessionStorage.getItem('parallaxToken') || '',
+  token: '',
   vehicles: { items: [], cursor: null, hasMore: false },
   ingestions: { items: [], cursor: null, hasMore: false },
   quarantine: { items: [], cursor: null, hasMore: false },
+  events: { items: [], cursor: null, hasMore: false },
   detail: { telemetry: [], cursor: null, hasMore: false },
   selectedVehicleId: null,
 };
@@ -37,7 +38,6 @@ async function api(path, options = {}) {
 
 function clearCredentials(message = '') {
   state.token = '';
-  sessionStorage.removeItem('parallaxToken');
   if (socket) { socket.disconnect(); socket = null; }
   $('#disconnect-button').classList.add('hidden');
   $('#credentials-open').classList.remove('hidden');
@@ -78,7 +78,13 @@ function metric(label, value, note, icon, tone = '') {
   return `<article class="metric-card ${tone}"><div class="metric-topline"><span class="metric-label">${esc(label)}</span><span class="metric-icon" aria-hidden="true">${esc(icon)}</span></div><div class="metric-value">${esc(value)}</div><div class="metric-note">${esc(note)}</div></article>`;
 }
 function makeTable(headers, rows) {
-  return `<table class="data-table"><thead><tr>${headers.map((header) => `<th scope="col">${header}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+  let cellIndex = 0;
+  const labeledRows = rows.replace(/<td(?![^>]*\bdata-label=)/g, () => {
+    const label = headers[cellIndex % headers.length];
+    cellIndex += 1;
+    return `<td data-label="${esc(label)}"`;
+  });
+  return `<table class="data-table"><thead><tr>${headers.map((header) => `<th scope="col">${esc(header)}</th>`).join('')}</tr></thead><tbody>${labeledRows}</tbody></table>`;
 }
 
 function vehicleStatus(vehicle) { return vehicle.connectivityStatus || (vehicle.state ? 'STALE' : 'OFFLINE'); }
@@ -223,9 +229,38 @@ async function loadIngestion({ append = false } = {}) {
   collection.items = append ? [...collection.items, ...result.data] : result.data;
   collection.cursor = result.page.nextCursor;
   collection.hasMore = result.page.hasMore;
-  const rows = collection.items.map((request) => `<tr><td>${esc(dateText(request.receivedAt))}</td><td>${esc(oemName(request.source))}</td><td>${badge(request.status)}</td><td>${request._count.events}</td><td>${renderRequestOutcomes(request.outcomes)}</td><td>${request._count.quarantineRecords}</td><td>${esc(request.errorCode || request.errorDetail || '—')}</td></tr>`).join('');
-  $('#ingestion-table').innerHTML = rows ? makeTable(['Received', 'Source', 'Request status', 'Events', 'Event outcomes', 'Quarantines', 'Request error'], rows) : empty('No ingestion requests', 'Receipts will appear after a simulator or OEM client sends telemetry.');
+  const rows = collection.items.map((request) => `<tr><td><button class="table-link mono" type="button" data-inspect-ingestion="${esc(request.id)}">${esc(request.id.slice(0, 8))}…</button></td><td>${esc(dateText(request.receivedAt))}</td><td>${esc(oemName(request.source))}</td><td>${badge(request.status)}</td><td>${request._count.events}</td><td>${renderRequestOutcomes(request.outcomes)}</td><td>${request._count.quarantineRecords}</td><td>${esc(request.errorCode || request.errorDetail || '—')}</td></tr>`).join('');
+  $('#ingestion-table').innerHTML = rows ? makeTable(['Request ID', 'Received', 'Source', 'Request status', 'Events', 'Event outcomes', 'Quarantines', 'Request error'], rows) : empty('No ingestion requests', 'Receipts will appear after a simulator or OEM client sends telemetry.');
   renderPagination('#ingestion-pagination', collection, 'request');
+}
+
+async function inspectIngestion(requestId) {
+  const detail = $('#ingestion-detail');
+  const dialog = $('#ingestion-dialog');
+  detail.innerHTML = '<div class="loading-state" role="status">Loading receipt details…</div>';
+  if (!dialog.open) dialog.showModal();
+  try {
+    const { data: request } = await api(`/api/v1/ingestions/${encodeURIComponent(requestId)}`);
+    const events = request.events.map((event) => `<article class="request-event"><div><strong>Event ${event.ordinal + 1}</strong>${badge(event.status)}<span class="mono">${esc(event.id)}</span></div><p>VIN ${esc(event.rawVin || 'unknown')} · ${esc(dateText(event.eventTime))}</p><details><summary>Parsed event payload</summary><pre>${esc(JSON.stringify(event.payload, null, 2) || 'No parsed event payload.')}</pre></details>${event.quarantineRecords.map((record) => `<p class="error-banner">${esc(record.reason)}: ${esc(record.detail)}</p>`).join('')}</article>`).join('');
+    detail.innerHTML = `<dl class="receipt-facts"><div><dt>Request</dt><dd class="mono">${esc(request.id)}</dd></div><div><dt>Source</dt><dd>${esc(oemName(request.source))}</dd></div><div><dt>Received</dt><dd>${esc(dateText(request.receivedAt))}</dd></div><div><dt>Status</dt><dd>${badge(request.status)}</dd></div><div><dt>Events</dt><dd>${request.events.length}</dd></div><div><dt>Request error</dt><dd>${esc(request.errorCode || request.errorDetail || '—')}</dd></div></dl><h3>Event outcomes</h3>${events || empty('No extracted events', 'The preserved request could not be parsed into telemetry events.')}<details class="raw-receipt"><summary>Original request body</summary><pre>${esc(request.rawRequestBody || 'Empty request body')}</pre><p>Base64 preserves the exact receipt bytes when the original body is not valid UTF-8.</p><pre>${esc(request.rawRequestBase64)}</pre></details>`;
+  } catch (error) {
+    detail.innerHTML = `<p class="error-banner" role="alert">${esc(error.message)}</p>`;
+  }
+}
+
+async function loadEvents({ append = false } = {}) {
+  const collection = state.events;
+  if (!append) { collection.items = []; collection.cursor = null; collection.hasMore = false; }
+  loading('#events-table');
+  const params = new URLSearchParams({ limit: '25' });
+  if (append && collection.cursor) params.set('cursor', collection.cursor);
+  const result = await api(`/api/v1/events/recent?${params}`);
+  collection.items = append ? [...collection.items, ...result.data] : result.data;
+  collection.cursor = result.page.nextCursor;
+  collection.hasMore = result.page.hasMore;
+  const rows = collection.items.map((event) => `<tr data-event-vehicle="${esc(event.vehicleId)}"><td>${esc(dateText(event.occurredAt))}</td><td>${esc(event.eventType.replaceAll('_', ' '))}</td><td>${badge(event.severity)}</td><td><button class="table-link mono" type="button" data-inspect-vehicle="${esc(event.vehicleId)}">${esc(event.vehicle?.vin || 'Vehicle')}</button></td><td>${esc(oemName(event.vehicle?.source))}</td><td>${esc(event.explanation)}</td></tr>`).join('');
+  $('#events-table').innerHTML = rows ? makeTable(['Occurred', 'Event type', 'Severity', 'Vehicle', 'OEM', 'Detection context'], rows) : empty('No operational events', 'Events will appear when accepted synthetic telemetry meets a detection rule.');
+  renderPagination('#events-pagination', collection, 'event');
 }
 
 async function loadQuarantine({ append = false } = {}) {
@@ -259,6 +294,7 @@ async function loadView() {
     if (state.view === 'vehicles') await loadVehicles();
     if (state.view === 'ingestion') await loadIngestion();
     if (state.view === 'quarantine') await loadQuarantine();
+    if (state.view === 'events') await loadEvents();
     const stamp = new Date();
     $('#last-refresh').textContent = `Updated ${stamp.toLocaleTimeString()}`;
     $('#footer-time').textContent = stamp.toLocaleDateString();
@@ -315,7 +351,6 @@ $('#credentials-form').addEventListener('submit', async (event) => {
       grant_type: 'client_credentials', client_id: form.get('client_id'), client_secret: form.get('client_secret'),
     }) });
     state.token = result.data.access_token;
-    sessionStorage.setItem('parallaxToken', state.token);
     const tenant = await api('/api/v1/summary');
     setTenant(tenant.data.organization);
     connectRealtime();
@@ -356,6 +391,21 @@ $('#vehicle-detail').addEventListener('click', (event) => {
 });
 $('#ingestion-pagination').addEventListener('click', (event) => { if (event.target.closest('#request-more')) loadIngestion({ append: true }).catch(showError); });
 $('#quarantine-pagination').addEventListener('click', (event) => { if (event.target.closest('#record-more')) loadQuarantine({ append: true }).catch(showError); });
+$('#events-pagination').addEventListener('click', (event) => { if (event.target.closest('#event-more')) loadEvents({ append: true }).catch(showError); });
+$('#ingestion-table').addEventListener('click', (event) => {
+  const requestId = event.target.closest('[data-inspect-ingestion]')?.dataset.inspectIngestion;
+  if (requestId) inspectIngestion(requestId);
+});
+$('#ingestion-dialog').addEventListener('click', (event) => {
+  if (event.target.matches('[data-close-dialog]')) $('#ingestion-dialog').close();
+});
+$('#ingestion-dialog').addEventListener('click', (event) => {
+  if (event.target === event.currentTarget) event.currentTarget.close();
+});
+$('#events-table').addEventListener('click', (event) => {
+  const id = event.target.closest('[data-inspect-vehicle]')?.dataset.inspectVehicle;
+  if (id) { state.view = 'vehicles'; history.replaceState(null, '', '#vehicles'); loadView().then(() => openVehicle(id)).catch(showError); }
+});
 
 async function loadVehicleHistory(append = false) {
   if (!state.selectedVehicleId) return;
@@ -372,7 +422,7 @@ async function loadVehicleHistory(append = false) {
 
 async function initialize() {
   const hashView = location.hash.slice(1);
-  if (['overview', 'vehicles', 'ingestion', 'quarantine'].includes(hashView)) state.view = hashView;
+  if (['overview', 'vehicles', 'ingestion', 'quarantine', 'events'].includes(hashView)) state.view = hashView;
   $('#disconnect-button').classList.toggle('hidden', !state.token);
   $('#credentials-open').classList.toggle('hidden', Boolean(state.token));
   if (state.token) connectRealtime();
@@ -388,3 +438,6 @@ async function initialize() {
 }
 
 initialize().catch(showError);
+setInterval(() => {
+  if (!document.hidden) loadView().catch(showError);
+}, 60_000);

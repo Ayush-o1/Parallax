@@ -1,0 +1,124 @@
+{
+  "generatedAt": "2026-11-01T08:27:50.840Z",
+  "machine": {
+    "platform": "Linux 7.0.14-linuxkit",
+    "arch": "arm64",
+    "cpus": 10,
+    "memoryGiB": 7.7
+  },
+  "node": "v24.22.2",
+  "postgres": "PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "workload": {
+    "directEvents": 1000,
+    "batchEvents": 1000,
+    "batchSize": 25,
+    "concurrency": 16,
+    "vehicleCount": 1,
+    "workerConcurrency": 4,
+    "apiRateLimitPerMinute": 1200
+  },
+  "runtime": {
+    "appDeployment": "production-shaped Docker Compose",
+    "database": "containerized PostgreSQL",
+    "queue": "containerized Redis + BullMQ worker",
+    "streaming": "disabled"
+  },
+  "requests": {
+    "total": 1112,
+    "successful": 1112,
+    "failed": 0
+  },
+  "ingestionMode": "asynchronous (Redis/BullMQ)",
+  "metrics": {
+    "direct": {
+      "samples": 1000,
+      "meanMs": 12.64,
+      "p50Ms": 11.12,
+      "p95Ms": 18.87,
+      "p99Ms": 62.78
+    },
+    "batch": {
+      "samples": 40,
+      "meanMs": 8.67,
+      "p50Ms": 8.41,
+      "p95Ms": 9.73,
+      "p99Ms": 11.33
+    },
+    "duplicate": {
+      "samples": 1,
+      "meanMs": 3.18,
+      "p50Ms": 3.18,
+      "p95Ms": 3.18,
+      "p99Ms": 3.18
+    },
+    "vehicleList": {
+      "samples": 20,
+      "meanMs": 2.27,
+      "p50Ms": 2,
+      "p95Ms": 3.39,
+      "p99Ms": 3.39
+    },
+    "vehicleDetail": {
+      "samples": 20,
+      "meanMs": 1.81,
+      "p50Ms": 1.79,
+      "p95Ms": 2.09,
+      "p99Ms": 2.09
+    },
+    "overview": {
+      "samples": 20,
+      "meanMs": 2.83,
+      "p50Ms": 2.79,
+      "p95Ms": 3.91,
+      "p99Ms": 3.91
+    },
+    "reads": {
+      "samples": 9,
+      "meanMs": 4.64,
+      "p50Ms": 4.39,
+      "p95Ms": 5.09,
+      "p99Ms": 5.09
+    }
+  },
+  "wallClock": {
+    "directMs": 794.34,
+    "batchMs": 348.69
+  },
+  "batchEventsPerSecond": 2867.85,
+  "directEventsPerSecond": 1258.9,
+  "telemetryRowsPersisted": 2000,
+  "outboxRowsPersisted": 0,
+  "outboxRowsPublished": 0,
+  "kafkaInboxRows": {},
+  "ingestionStatusCounts": {
+    "ACCEPTED": 2000,
+    "DUPLICATE": 1
+  },
+  "errorRate": 0,
+  "rejectedEventRate": 0,
+  "requestCompletionMs": {
+    "samples": 1041,
+    "mean": 806.51,
+    "p95": 1135
+  },
+  "queryPlan": [
+    "Limit  (cost=32.66..32.68 rows=9 width=38) (actual time=0.482..0.487 rows=50.00 loops=1)",
+    "  Buffers: shared hit=65",
+    "  ->  Sort  (cost=32.66..32.68 rows=9 width=38) (actual time=0.481..0.483 rows=50.00 loops=1)",
+    "        Sort Key: event_time DESC",
+    "        Sort Method: top-N heapsort  Memory: 31kB",
+    "        Buffers: shared hit=65",
+    "        ->  Bitmap Heap Scan on telemetry_readings  (cost=4.35..32.52 rows=9 width=38) (actual time=0.057..0.258 rows=2000.00 loops=1)",
+    "              Recheck Cond: (vehicle_id = '9b4030d3-35fe-4e9f-94bd-8ecf93e7c708'::uuid)",
+    "              Heap Blocks: exact=55",
+    "              Buffers: shared hit=65",
+    "              ->  Bitmap Index Scan on telemetry_readings_vehicle_id_received_at_idx  (cost=0.00..4.34 rows=9 width=0) (actual time=0.049..0.049 rows=2001.00 loops=1)",
+    "                    Index Cond: (vehicle_id = '9b4030d3-35fe-4e9f-94bd-8ecf93e7c708'::uuid)",
+    "                    Index Searches: 1",
+    "                    Buffers: shared hit=10",
+    "Planning:",
+    "  Buffers: shared hit=117",
+    "Planning Time: 0.393 ms",
+    "Execution Time: 0.504 ms"
+  ]
+}

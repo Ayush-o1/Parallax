@@ -39,6 +39,9 @@ const authRoutes = require('./routes/auth.routes');
 const { registry, requestMetrics } = require('./middleware/requestMetrics');
 
 const app = express();
+// Render and common reverse proxies add a single trusted forwarding hop.
+// Keep this explicit; `true` would trust client-supplied X-Forwarded-* data.
+app.set('trust proxy', config.trustProxyHops);
 app.use(helmet({ contentSecurityPolicy: { directives: {
   ...helmet.contentSecurityPolicy.getDefaultDirectives(),
   connectSrc: ["'self'", 'ws:', 'wss:'],
@@ -49,7 +52,15 @@ app.use(helmet({ contentSecurityPolicy: { directives: {
 // captured too.
 app.use(requestLogger);
 app.use(requestMetrics);
-app.use('/api/v1', rateLimit({ windowMs: 60_000, limit: Number(process.env.API_RATE_LIMIT_PER_MINUTE || 1200), standardHeaders: true, legacyHeaders: false }));
+app.use('/api/v1', rateLimit({
+  windowMs: 60_000,
+  limit: config.apiRateLimitPerMinute,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ success: false, error: {
+    code: 'RATE_LIMITED', message: 'Too many requests. Try again later.', requestId: req.reqId,
+  } }),
+}));
 
 // Ingestion captures raw bytes before JSON parsing or content decompression.
 app.use('/api/v1/ingest', ingestionRoutes);
@@ -69,8 +80,8 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/vehicles', vehicleRoutes);
 app.use('/api/v1', telemetryRoutes);
 app.get('/metrics', async (req, res, next) => {
-  if (process.env.NODE_ENV === 'production') {
-    const expected = process.env.METRICS_TOKEN || '';
+  if (config.isProduction()) {
+    const expected = config.metricsToken || '';
     const supplied = req.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
     const expectedBuffer = Buffer.from(expected);
     const suppliedBuffer = Buffer.from(supplied);

@@ -15,7 +15,7 @@ An HTTP request may contain a batch of telemetry events. The request body must s
 ### Request and event records
 
 - `IngestionRequest` represents one HTTP receipt, stores its original request bytes before parsing, and requires an organization owner.
-- Unauthenticated local requests are attributed to the seeded `demo` organization; authenticated requests will resolve organization from verified credentials.
+- Unauthenticated local requests are attributed to the seeded `demo` organization. Production requests resolve organization from a verified API-client credential; see ADR-008 for operation roles.
 - `IngestionEvent` represents one extracted event with an ordinal and independent processing status.
 - A malformed body is quarantined at request level without requiring an event row.
 
@@ -38,7 +38,7 @@ Use a PostgreSQL `INSERT ... ON CONFLICT (vehicle_id) DO UPDATE ... WHERE curren
 
 ### Event identifier scope and odometer ordering
 
-The documented OEM identifiers are unique per vehicle, not across a whole source. The reading constraint is therefore `(source, vehicle_id, external_event_id)`. Gamma's sequence is per vehicle; its canonical ID includes the VIN for clarity, while vehicle ID remains a separate uniqueness component. Do not tighten this scope without an explicit source-wide OEM guarantee.
+The current synthetic OEM contracts describe identifiers as unique per vehicle and do not guarantee uniqueness across a whole source. The reading constraint is therefore `(source, vehicle_id, external_event_id)`. Gamma's sequence is per vehicle; its canonical ID includes the VIN for clarity, while vehicle ID remains a separate uniqueness component. Do not tighten this scope without documenting an explicit source-wide provider guarantee.
 
 State ordering and odometer anomaly detection use `eventTime`. A late event is stored in history but is not compared to the trusted latest odometer. A newer suspicious odometer is retained with `odometer_suspicious=true`, quarantined, and excluded from the trusted odometer update; valid speed, location, and fuel from that event can still become latest state.
 

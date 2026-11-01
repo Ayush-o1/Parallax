@@ -8,12 +8,16 @@ const { startConsumer } = require('../src/streaming/eventConsumer');
 const { startMetricsServer } = require('../src/observability/metricsServer');
 
 config.validateConfig();
+if (!config.streamingEnabled) {
+  logger.info('streaming disabled; PostgreSQL outbox remains the durable event source');
+  process.exit(0);
+}
 Promise.all([
   startPublisher(),
   startConsumer('parallax.realtime.v1'),
   startConsumer('parallax.analytics.v1'),
 ]).then((stoppers) => {
-  const stopMetrics = startMetricsServer({ port: Number(process.env.STREAM_METRICS_PORT || 9466) });
+  const stopMetrics = startMetricsServer({ port: config.streamMetricsPort });
   let stopping = false;
   const stop = async (signal) => {
     if (stopping) return;

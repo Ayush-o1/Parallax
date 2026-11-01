@@ -15,6 +15,7 @@ module.exports = {
   events: (req, res) => send(telemetryService.events(req.organizationId, req.params.vehicleId, req.query), res),
   summary: (req, res) => send(telemetryService.summary(req.organizationId), res),
   history: (req, res) => send(telemetryService.history(req.organizationId, req.query), res),
+  ingestionDetail: (req, res) => send(telemetryService.ingestionDetail(req.organizationId, req.params.requestId), res),
   quarantines: (req, res) => send(telemetryService.quarantines(req.organizationId, req.query), res),
   recent: (req, res) => send(telemetryService.recentReadings(req.organizationId, req.query), res),
   recentEvents: (req, res) => send(telemetryService.recentEvents(req.organizationId, req.query), res),

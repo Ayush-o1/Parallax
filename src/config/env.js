@@ -41,13 +41,30 @@ if (process.env.NODE_ENV !== 'production') {
 
 const isTestEnv = (process.env.NODE_ENV || 'development') === 'test';
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
+function integer(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (!/^\d+$/.test(raw)) return Number.NaN;
+  return Number(raw);
+}
+function decimal(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : Number.NaN;
+}
+function boolean(name, fallback = false) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  return raw === 'true';
+}
 
 const config = {
   // Runtime environment. Controls log verbosity, error detail, etc.
   nodeEnv: process.env.NODE_ENV || 'development',
 
   // HTTP server port.
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: integer('PORT', 3000),
 
   // Active database connection string.
   // In test environments we automatically use TEST_DATABASE_URL so
@@ -59,26 +76,45 @@ const config = {
   // Separate connection string used by the test runner.
   // Kept as a separate property so test helpers can reference it directly.
   testDatabaseUrl: process.env.TEST_DATABASE_URL,
+  accessTokenSeconds: integer('ACCESS_TOKEN_SECONDS', 3600),
+  redisUrl: process.env.REDIS_URL,
+  streamingEnabled: boolean('STREAMING_ENABLED', Boolean(process.env.KAFKA_BROKERS)),
+  apiRateLimitPerMinute: integer('API_RATE_LIMIT_PER_MINUTE', 1200),
+  tokenRateLimit: integer('TOKEN_RATE_LIMIT', 20),
+  workerConcurrency: integer('WORKER_CONCURRENCY', 8),
+  requestTimeoutMs: integer('REQUEST_TIMEOUT_MS', 30_000),
+  headersTimeoutMs: integer('HEADERS_TIMEOUT_MS', 35_000),
+  trustProxyHops: integer('TRUST_PROXY_HOPS', process.env.NODE_ENV === 'production' ? 1 : 0),
+  maxBatchEvents: integer('MAX_BATCH_EVENTS', 500),
+  dbConnectionLimit: integer('DB_CONNECTION_LIMIT', 10),
+  dbPoolTimeoutSeconds: integer('DB_POOL_TIMEOUT_SECONDS', 10),
+  dbConnectTimeoutSeconds: integer('DB_CONNECT_TIMEOUT_SECONDS', 5),
   tokenSigningSecret: process.env.TOKEN_SIGNING_SECRET
     || (process.env.NODE_ENV === 'production' ? undefined : 'parallax-local-only-token-signing-secret-change-me'),
-  accessTokenSeconds: parseInt(process.env.ACCESS_TOKEN_SECONDS || '3600', 10),
-  redisUrl: process.env.REDIS_URL,
+  metricsToken: process.env.METRICS_TOKEN,
+  workerMetricsPort: integer('WORKER_METRICS_PORT', 9465),
+  streamMetricsPort: integer('STREAM_METRICS_PORT', 9466),
+  kafkaBrokers: process.env.KAFKA_BROKERS,
+  kafkaClientId: process.env.KAFKA_CLIENT_ID || 'parallax',
+  kafkaPartitions: integer('KAFKA_PARTITIONS', 3),
+  kafkaTelemetryTopic: process.env.KAFKA_TELEMETRY_TOPIC || 'telemetry.normalized.v1',
+  kafkaEventsTopic: process.env.KAFKA_EVENTS_TOPIC || 'operational.events.v1',
 
   // Logging verbosity. Accepted: debug | info | warn | error
   logLevel: process.env.LOG_LEVEL || 'info',
 
   // Hard limit on incoming request body size. Express will reject
   // payloads larger than this before they reach a controller.
-  maxPayloadBytes: parseInt(process.env.MAX_PAYLOAD_BYTES || '65536', 10),
+  maxPayloadBytes: integer('MAX_PAYLOAD_BYTES', 65536),
 
   // ── Stale vehicle detection ─────────────────────────────────────────────
   // Per-OEM expected reporting intervals (seconds).
   // Used to determine whether a vehicle is actively connected.
   // A vehicle is stale when: now - lastReceivedAt > (interval * staleFactor).
   oemReportingIntervals: {
-    OEM_ALPHA: parseInt(process.env.OEM_ALPHA_INTERVAL_SECONDS || '30', 10),
-    OEM_BETA:  parseInt(process.env.OEM_BETA_INTERVAL_SECONDS  || '60', 10),
-    OEM_GAMMA: parseInt(process.env.OEM_GAMMA_INTERVAL_SECONDS || '15', 10),
+    OEM_ALPHA: integer('OEM_ALPHA_INTERVAL_SECONDS', 30),
+    OEM_BETA:  integer('OEM_BETA_INTERVAL_SECONDS', 60),
+    OEM_GAMMA: integer('OEM_GAMMA_INTERVAL_SECONDS', 15),
   },
 
   // Multiplier applied to the OEM's expected interval before a vehicle
@@ -86,48 +122,33 @@ const config = {
   // every 30 s, we allow up to 90 s of silence before marking it stale.
   // This prevents spurious stale alerts caused by momentary connectivity
   // gaps or minor scheduling drift in the OEM's telemetry client.
-  staleVehicleFactor: parseFloat(process.env.STALE_VEHICLE_FACTOR || '3'),
+  staleVehicleFactor: decimal('STALE_VEHICLE_FACTOR', 3),
 
   // Absolute fallback threshold (seconds) when source reporting frequency
   // is unknown. Unlike known OEMs, this value is not multiplied by the factor.
-  staleVehicleFallbackSeconds: parseInt(
-    process.env.STALE_VEHICLE_FALLBACK_SECONDS || '300',
-    10
-  ),
+  staleVehicleFallbackSeconds: integer('STALE_VEHICLE_FALLBACK_SECONDS', 300),
 
   // ── Timestamp acceptance window ─────────────────────────────────────────
   // Maximum age of an event's eventTime (seconds). Events older than
   // this are quarantined as TIMESTAMP_OUT_OF_RANGE.
-  maxEventAgePastSeconds: parseInt(
-    process.env.MAX_EVENT_AGE_PAST_SECONDS || '86400', // 24 hours
-    10
-  ),
+  maxEventAgePastSeconds: integer('MAX_EVENT_AGE_PAST_SECONDS', 86400),
 
   // Maximum clock skew ahead of server time (seconds). Events with
   // eventTime more than this far in the future are quarantined.
-  maxEventAgeFutureSeconds: parseInt(
-    process.env.MAX_EVENT_AGE_FUTURE_SECONDS || '300', // 5 minutes
-    10
-  ),
+  maxEventAgeFutureSeconds: integer('MAX_EVENT_AGE_FUTURE_SECONDS', 300),
 
   // ── Derived event thresholds ────────────────────────────────────────────
   // Minimum speed (km/h) to consider a vehicle in motion (trip start).
-  tripStartSpeedKph: parseFloat(process.env.TRIP_START_SPEED_KPH || '5'),
+  tripStartSpeedKph: decimal('TRIP_START_SPEED_KPH', 5),
 
   // Duration (seconds) a vehicle must remain below tripStartSpeedKph
   // before a trip-end event is triggered.
-  tripEndStationarySeconds: parseInt(
-    process.env.TRIP_END_STATIONARY_SECONDS || '120',
-    10
-  ),
+  tripEndStationarySeconds: integer('TRIP_END_STATIONARY_SECONDS', 120),
 
   // Duration (seconds) a vehicle must be stationary with engine on
   // before an excessive-idling event fires.
-  idlingThresholdSeconds: parseInt(
-    process.env.IDLING_THRESHOLD_SECONDS || '180',
-    10
-  ),
-  hardBrakingAccelMss: parseFloat(process.env.HARD_BRAKING_ACCEL_MSS || '-3'),
+  idlingThresholdSeconds: integer('IDLING_THRESHOLD_SECONDS', 180),
+  hardBrakingAccelMss: decimal('HARD_BRAKING_ACCEL_MSS', -3),
 
   // Derived helpers.
   isDevelopment() { return this.nodeEnv === 'development'; },
@@ -193,6 +214,12 @@ function validateConfig() {
   if (!['postgres:', 'postgresql:'].includes(parsedDatabaseUrl.protocol)) {
     throw new Error(`${variableName} must use the PostgreSQL protocol.`);
   }
+  if (config.isProduction() && ['parallax_dev', 'parallax_test'].includes(parsedDatabaseUrl.pathname.slice(1))) {
+    throw new Error('Production DATABASE_URL must not point to a development or test database.');
+  }
+  if (config.isProduction() && ['localhost', '127.0.0.1', '::1'].includes(parsedDatabaseUrl.hostname)) {
+    throw new Error('Production DATABASE_URL must point to a reachable managed or private database host.');
+  }
   if (expectedDatabase && parsedDatabaseUrl.pathname.slice(1) !== expectedDatabase) {
     throw new Error(`${variableName} must point exclusively to the ${expectedDatabase} database.`);
   }
@@ -211,6 +238,18 @@ function validateConfig() {
     TRIP_END_STATIONARY_SECONDS: config.tripEndStationarySeconds,
     IDLING_THRESHOLD_SECONDS: config.idlingThresholdSeconds,
     ACCESS_TOKEN_SECONDS: config.accessTokenSeconds,
+    API_RATE_LIMIT_PER_MINUTE: config.apiRateLimitPerMinute,
+    TOKEN_RATE_LIMIT: config.tokenRateLimit,
+    WORKER_CONCURRENCY: config.workerConcurrency,
+    REQUEST_TIMEOUT_MS: config.requestTimeoutMs,
+    HEADERS_TIMEOUT_MS: config.headersTimeoutMs,
+    MAX_BATCH_EVENTS: config.maxBatchEvents,
+    DB_CONNECTION_LIMIT: config.dbConnectionLimit,
+    DB_POOL_TIMEOUT_SECONDS: config.dbPoolTimeoutSeconds,
+    DB_CONNECT_TIMEOUT_SECONDS: config.dbConnectTimeoutSeconds,
+    WORKER_METRICS_PORT: config.workerMetricsPort,
+    STREAM_METRICS_PORT: config.streamMetricsPort,
+    KAFKA_PARTITIONS: config.kafkaPartitions,
   };
   const invalid = Object.entries(positiveSettings)
     .filter(([key, value]) => !Number.isFinite(value) || value <= 0 || (key === 'PORT' && value > 65535))
@@ -218,8 +257,31 @@ function validateConfig() {
   if (invalid.length) {
     throw new Error(`Invalid environment variable values: ${invalid.join(', ')}.`);
   }
+  if (!Number.isInteger(config.trustProxyHops) || config.trustProxyHops < 0) {
+    throw new Error('TRUST_PROXY_HOPS must be a non-negative integer.');
+  }
   if (config.isProduction() && (!config.tokenSigningSecret || Buffer.byteLength(config.tokenSigningSecret) < 32)) {
     throw new Error('TOKEN_SIGNING_SECRET must be at least 32 bytes in production.');
+  }
+  if (config.isProduction()) {
+    const missingProduction = [];
+    if (!config.redisUrl) missingProduction.push('REDIS_URL');
+    if (!config.metricsToken || Buffer.byteLength(config.metricsToken) < 32) missingProduction.push('METRICS_TOKEN (at least 32 bytes)');
+    if (process.env.STREAMING_ENABLED === undefined) missingProduction.push('STREAMING_ENABLED (set true or false explicitly)');
+    if (missingProduction.length) throw new Error(`Missing production security/runtime configuration: ${missingProduction.join(', ')}.`);
+    if (config.redisUrl) {
+      let parsedRedisUrl;
+      try { parsedRedisUrl = new URL(config.redisUrl); } catch { throw new Error('REDIS_URL must be a valid redis:// or rediss:// URL.'); }
+      if (!['redis:', 'rediss:'].includes(parsedRedisUrl.protocol)) throw new Error('REDIS_URL must use redis:// or rediss://.');
+    }
+    if (config.streamingEnabled && !config.kafkaBrokers) throw new Error('KAFKA_BROKERS is required when STREAMING_ENABLED=true.');
+    if (config.streamingEnabled && config.kafkaPartitions < 1) throw new Error('KAFKA_PARTITIONS must be a positive integer.');
+  }
+  if (process.env.STREAMING_ENABLED !== undefined && !['true', 'false'].includes(process.env.STREAMING_ENABLED)) {
+    throw new Error('STREAMING_ENABLED must be true or false.');
+  }
+  if (config.headersTimeoutMs <= config.requestTimeoutMs) {
+    throw new Error('HEADERS_TIMEOUT_MS must be greater than REQUEST_TIMEOUT_MS.');
   }
 }
 

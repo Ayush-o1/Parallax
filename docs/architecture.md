@@ -60,17 +60,17 @@ HTTP Request
                        └───────────────────────┘
 ```
 
-### Layer rules (enforced by convention)
+### Current module boundaries
 
 | Layer | May call | May NOT call |
 |-------|----------|--------------|
-| Route | Controller, Middleware | Service, Repository, Adapter |
-| Controller | Service | Repository, Adapter directly |
-| Service | Repository, Adapter, other Services | Controller |
+| Route | Controller, access middleware | Business logic |
+| Controller | Service | SQL/business rules |
+| Service | Prisma, repositories, adapters, other services | HTTP response formatting |
 | Adapter | Utility functions | Service, Repository |
 | Repository | Prisma client | Service, Controller |
 
-Breaking these rules creates coupling. If a controller queries the database directly, tests for that controller must set up a real database — slowing them down unnecessarily.
+Services currently use Prisma directly for most operations; repositories isolate selected query paths. The repository layer is not a mandatory indirection and is not applied mechanically.
 
 ---
 
@@ -130,23 +130,23 @@ src/
 ├── server.js               — Port binding and graceful shutdown
 │
 ├── routes/
-│   ├── health.routes.js    — GET /health
-│   ├── vehicle.routes.js   — Phase 3
-│   ├── ingest.routes.js    — Phase 5
-│   ├── telemetry.routes.js — Phase 7
-│   └── event.routes.js     — Phase 8
+│   ├── health.routes.js    — liveness and dependency readiness
+│   ├── auth.routes.js      — client-credential token exchange
+│   ├── vehicle.routes.js   — tenant vehicle registry
+│   ├── ingest.routes.js    — byte-preserving ingestion
+│   └── telemetry.routes.js — history, requests, quarantine, events, summary
 │
 ├── controllers/
 │   ├── health.controller.js
 │   ├── vehicle.controller.js
 │   ├── ingest.controller.js
-│   ├── telemetry.controller.js
-│   └── event.controller.js
+│   └── telemetry.controller.js
 │
 ├── services/
 │   ├── ingestion.service.js     — Orchestrates the ingest pipeline
 │   ├── vehicle.service.js       — Vehicle CRUD business logic
-│   ├── telemetry.service.js     — Historical query logic
+│   ├── telemetry.service.js     — Tenant-scoped read/query logic
+│   ├── auth.service.js          — Short-lived client tokens
 │   └── eventDetection.service.js — Derives operational events
 │
 ├── adapters/
@@ -168,6 +168,10 @@ src/
 │   ├── requestLogger.js
 │   └── errorHandler.js
 │
+├── workers/ingestionWorker.js — BullMQ recovery, stale scan, heartbeat
+├── streaming/                 — optional outbox publisher and Kafka inbox consumers
+├── realtime/                  — authenticated tenant-room Socket.IO
+├── observability/             — Prometheus metrics endpoints
 └── utils/
     ├── logger.js
     ├── unitConverter.js         — Phase 4
@@ -188,7 +192,7 @@ src/
 | `vehicle_states` | One latest state per vehicle and trusted odometer | UUID PK; unique vehicle; conditional UPSERT target |
 | `derived_events` | Operational events with deterministic dedupe key | UUID PK; unique dedupe key |
 | `quarantine_records` | Request- or event-level rejection record | Required request FK; nullable event and vehicle FKs |
-| `api_clients` | Organization-scoped client credential used for bearer access tokens | UUID PK; unique client ID; revocable credential tied to one organization |
+| `api_clients` | Organization-scoped client credential used for bearer access tokens | UUID PK; unique client ID; bcrypt hash; revocation; `VIEWER`/`INGESTOR`/`ADMIN` role |
 | `outbox_events` | Durable publication intent committed with telemetry/event changes | Unique deterministic key; claim lease; organization and vehicle scope |
 | `kafka_inbox` | Idempotency ledger for each stream consumer group | Unique `(consumer_group, event_key)` and `(consumer_group, topic, partition, offset)` |
 
@@ -208,7 +212,7 @@ Request and event status values are defined in ADR-006 and `docs/data-contracts.
 
 All primary and foreign identifiers use PostgreSQL UUID with database-side `gen_random_uuid()` defaults so raw SQL writes remain safe. The migration adds explicit PostgreSQL `CHECK` constraints for speed, fuel, location, odometer, non-empty stable event IDs, and non-negative batch ordinals. Original request bodies use `BYTEA`; parsed JSON uses nullable `JSONB`; normalized measurements use bounded `DECIMAL(p,s)`; event, receipt, and detection times use `TIMESTAMPTZ`. Source identifiers remain strings so unknown OEM values can be preserved.
 
-Every vehicle and ingestion request has a required organization FK. Unauthenticated local development uses a seeded organization with slug `demo`. The request is attributed to that organization for quarantine and audit queries. Authentication must derive organization ownership from verified credentials; clients cannot choose an arbitrary organization ID.
+Every vehicle and ingestion request has a required organization FK. Unauthenticated local development uses a seeded organization with slug `demo`. The request is attributed to that organization for quarantine and audit queries. Production resolves ownership and `VIEWER`/`INGESTOR`/`ADMIN` permission from a verified bearer token and active API-client row; clients cannot choose an arbitrary organization ID.
 
 ## 8. Vehicle and organization ownership
 
@@ -237,9 +241,11 @@ Every vehicle and ingestion request has a required organization FK. Unauthentica
 
 ## 11. Asynchronous jobs and streaming
 
-When `REDIS_URL` is configured, HTTP ingestion commits the raw request and pending event rows, then queues the request ID. A BullMQ worker claims pending event rows, processes each in its own PostgreSQL transaction, retries with exponential backoff, and routes exhausted jobs to a dead-letter queue. On startup it re-enqueues durable requests left `RECEIVED` or `PROCESSING`. Without Redis configured, local development processes synchronously through the same service path.
+In production, `REDIS_URL` is required. HTTP ingestion commits the raw request and pending event rows, then queues the request ID. A BullMQ worker claims pending event rows, processes each in its own PostgreSQL transaction, retries with exponential backoff, and routes exhausted jobs to a dead-letter queue. On startup it re-enqueues durable requests left `RECEIVED` or `PROCESSING`. Without Redis configured, local development/test processes synchronously through the same service path.
 
-Normalized telemetry and operational events create outbox rows in the same PostgreSQL transaction as readings, vehicle state, and event status. A separate Kafka publisher claims un-published rows with a PostgreSQL lease, sends to `telemetry.normalized.v1` or `operational.events.v1` keyed by vehicle UUID, then marks the row published. A crash after Kafka accepts a message but before the DB mark can resend it; consumers deduplicate using the stable outbox event key. Delivery is at least once. Kafka partitioning preserves per-vehicle order within one topic, while independent consumer groups each keep their own inbox record. Kafka being unavailable leaves outbox rows durable for retry and does not roll back accepted telemetry.
+When `STREAMING_ENABLED=true`, normalized telemetry and operational events create outbox rows in the same PostgreSQL transaction as readings, vehicle state, and event status. A separate Kafka publisher claims unpublished rows with a PostgreSQL lease, sends to `telemetry.normalized.v1` or `operational.events.v1` keyed by vehicle UUID, then marks the row published. A crash after Kafka accepts a message but before the DB mark can resend it; consumers deduplicate using the stable outbox event key. Delivery is at least once. Kafka partitioning preserves per-vehicle order within one topic, while independent consumer groups each keep their own inbox record. Kafka being unavailable leaves outbox rows durable for retry and does not roll back accepted telemetry. When streaming is disabled, no publication-intent rows are created; PostgreSQL readings and derived events remain durable and queryable.
 
-Prometheus metrics expose bounded-cardinality HTTP request counts/latencies, ingestion outcomes, BullMQ job results and queue wait time, outbox publication and pending counts, and per-consumer-group Kafka lag by topic partition. In production, `/metrics` is hidden unless the caller supplies the configured metrics bearer token.
+Prometheus metrics expose bounded-cardinality HTTP request counts/latencies, ingestion outcomes, BullMQ job results and queue wait time, outbox publication and pending counts, and per-consumer-group Kafka lag by topic partition. Each process has a separate registry. In production, `/metrics` is hidden unless the caller supplies the configured metrics bearer token. `/health/live` is process liveness; `/health/ready` checks PostgreSQL, Redis, and a short-lived worker heartbeat.
+
+Production configuration fails closed without a database URL, strong token/metrics secrets, and Redis. The Render Blueprint runs one web process and one worker so current process-local Socket.IO rooms and rate limits remain correct; horizontal web scaling requires a shared Socket.IO adapter and rate-limit store. The public demo disables streaming and uses managed Postgres/Redis services. See [deployment](DEPLOYMENT.md), [security](SECURITY.md), and [operations](OPERATIONS.md).
 | Docker Compose | Phase 2 (optional, PostgreSQL is local) |

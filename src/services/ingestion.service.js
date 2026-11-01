@@ -137,7 +137,7 @@ async function processOne(request, event) {
         eventTime: normalized.eventTime, externalEventId: normalized.externalEventId, rawVin: normalized.vin,
       } });
       const operationalEvents = await eventDetection.detect(tx, { vehicleId: vehicle.id, reading, previous, isNewer, odometerSuspicious });
-      await tx.outboxEvent.createMany({
+      if (config.streamingEnabled) await tx.outboxEvent.createMany({
         data: [
           {
             organizationId: request.organizationId,
@@ -249,8 +249,8 @@ async function prepareRequest(request) {
   }
 
   const items = extractEvents(payload);
-  if (items.length === 0 || items.length > 500) {
-    await ingestionRepository.markMalformed(request.id, request.source, 'INVALID_BATCH_SIZE', 'Payload must contain between 1 and 500 events.');
+  if (items.length === 0 || items.length > config.maxBatchEvents) {
+    await ingestionRepository.markMalformed(request.id, request.source, 'INVALID_BATCH_SIZE', `Payload must contain between 1 and ${config.maxBatchEvents} events.`);
     return { malformed: true, requestId: request.id, status: 'MALFORMED', eventResults: [] };
   }
   const events = await ingestionRepository.createEvents(request.id, request.source, items, payload);

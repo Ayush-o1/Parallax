@@ -19,6 +19,7 @@ async function socketAuth(socket, next) {
     if (!client || client.organizationId !== payload.org) throw new Error('Invalid or revoked token.');
     socket.data.organizationId = client.organizationId;
     socket.data.apiClientId = client.id;
+    socket.data.apiClientRole = client.role;
     return next();
   } catch {
     return next(new Error('Unauthorized'));

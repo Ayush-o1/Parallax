@@ -11,9 +11,10 @@ async function main() {
   process.env.DATABASE_URL = config.databaseUrl;
   const prisma = new PrismaClient();
   try {
-    const [action, argument, name] = process.argv.slice(2);
+    const [action, argument, name, requestedRole = 'VIEWER'] = process.argv.slice(2);
     if (action === 'create') {
-      if (!argument || !name) throw new Error('Usage: npm run client:create -- <organization-slug> <client-name>');
+      if (!argument || !name) throw new Error('Usage: npm run client:create -- <organization-slug> <client-name> [VIEWER|INGESTOR|ADMIN]');
+      if (!['VIEWER', 'INGESTOR', 'ADMIN'].includes(requestedRole)) throw new Error('Role must be VIEWER, INGESTOR, or ADMIN.');
       const organization = await prisma.organization.findUnique({ where: { slug: argument } });
       if (!organization) throw new Error(`Organization not found: ${argument}`);
       const clientId = `px_${crypto.randomUUID()}`;
@@ -21,11 +22,12 @@ async function main() {
       await prisma.apiClient.create({ data: {
         organizationId: organization.id,
         name,
+        role: requestedRole,
         clientId,
         secretHash: await bcrypt.hash(clientSecret, 12),
       } });
       // Secret is shown only at creation; the DB stores only its bcrypt hash.
-      process.stdout.write(`${JSON.stringify({ clientId, clientSecret }, null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify({ clientId, clientSecret, role: requestedRole }, null, 2)}\n`);
     } else if (action === 'revoke') {
       if (!argument) throw new Error('Usage: npm run client:revoke -- <client-id>');
       const result = await prisma.apiClient.updateMany({

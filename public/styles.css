@@ -223,9 +223,17 @@ footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px
   .source-panel { display: block; }
   .source-panel > .source-breakdown, .source-panel > .panel-subheading, .source-panel > .event-list { display: grid; }
   .source-breakdown { margin: 15px 0; }
-  .table-wrap { margin-right: -2px; }
-  .data-table th { padding: 8px 7px; font-size: 8px; }
-  .data-table td { padding: 9px 7px; font-size: 9px; }
+  .table-wrap { overflow: visible; }
+  .data-table { display: block; white-space: normal; }
+  .data-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
+  .data-table tbody { display: grid; gap: 8px; }
+  .data-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .data-table tbody tr[data-id] { cursor: pointer; }
+  .data-table td { display: grid; grid-template-columns: minmax(65px, .65fr) minmax(0, 1fr); align-items: baseline; gap: 8px; min-width: 0; padding: 7px 2px; border-bottom: 1px solid #eef1f5; white-space: normal; overflow-wrap: anywhere; font-size: 9px; }
+  .data-table td::before { color: #8994a2; content: attr(data-label); font-size: 8px; font-weight: 690; letter-spacing: .02em; text-transform: uppercase; }
+  .data-table tbody tr td:last-child { border-bottom: 0; }
+  .data-table td[colspan] { display: block; grid-column: 1 / -1; }
+  .data-table td[colspan]::before { display: none; }
   .filters { width: 100%; justify-content: stretch; }
   .filters input[type="search"] { width: auto; min-width: 0; flex: 1 1 100%; }
   .filters select { min-width: 0; flex: 1 1 calc(50% - 5px); }
@@ -241,4 +249,29 @@ footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+
+.table-link { padding: 0; border: 0; background: transparent; color: #31599d; font-size: inherit; text-align: left; text-decoration: underline; text-decoration-color: #b8c8e0; text-underline-offset: 2px; cursor: pointer; }
+.table-link:hover { color: #1c3d77; text-decoration-color: currentColor; }
+.mono, .receipt-facts .mono, .request-event .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.inspection-dialog { width: min(780px, calc(100vw - 24px)); max-height: min(84vh, 900px); padding: 20px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); box-shadow: 0 24px 70px rgba(20, 33, 54, .22); }
+.inspection-dialog::backdrop { background: rgba(20, 30, 45, .42); }
+.dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.dialog-heading h2 { margin: 4px 0 0; font-size: 16px; }
+.dialog-content { max-height: calc(84vh - 90px); overflow: auto; padding-top: 14px; }
+.receipt-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 18px; }
+.receipt-facts div { min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 5px; }
+.receipt-facts dt { color: var(--muted); font-size: 9px; }
+.receipt-facts dd { margin: 4px 0 0; font-size: 11px; overflow-wrap: anywhere; }
+.dialog-content h3 { margin: 16px 0 9px; font-size: 12px; }
+.request-event { margin: 8px 0; padding: 11px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfd; }
+.request-event > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.request-event p { color: var(--muted); font-size: 10px; }
+.request-event pre, .raw-receipt pre { max-height: 320px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: #f6f7f9; color: #3c4a5c; font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.raw-receipt { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.raw-receipt p { color: var(--muted); font-size: 10px; }
+@media (max-width: 680px) {
+  .inspection-dialog { padding: 14px; }
+  .receipt-facts { grid-template-columns: 1fr; }
+  .data-table tbody tr { grid-template-columns: 1fr; }
 }

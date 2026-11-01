@@ -317,6 +317,8 @@ UNIQUE (source, vehicle_id, external_event_id)
 
 Alpha `event_id` and Beta `message_id` must be stable per vehicle; Gamma's sequence is per VIN and is canonicalized as `GAMMA-{vin}-{seq}`. The source identifier remains a string. Unknown source values are preserved on requests and quarantine records.
 
+Each provider identifier is unique per vehicle under the current synthetic source contracts; no current source guarantees a source-wide identifier. Therefore, keep the database key `(source, vehicle_id, external_event_id)`. If a real provider contract later guarantees uniqueness across its entire source, document that guarantee and update the scope through an ADR before changing the constraint. See [ADR-006](decisions/ADR-006-ingestion-lifecycle-and-derived-event-idempotency.md) and ADR-002.
+
 Every HTTP receipt becomes an `IngestionRequest`; each extracted item becomes its own `IngestionEvent`, even when the item is a duplicate. A duplicate event status is committed without a second normalized reading or vehicle-state update. See ADR-002 for why the database unique constraint is authoritative.
 
 ## 7. Event Ordering and Odometer Regression
@@ -474,7 +476,7 @@ The raw request commit is outside these event transactions, so no event failure 
 
 Unknown source strings are retained as received in request and event rows, then quarantined as `UNKNOWN_SOURCE`. The original content-encoding header is stored with the request so a recovery worker can decode the body again after a crash between raw-body commit and event extraction. JSON parse failures are quarantined against the request, with no synthetic event row. For a valid batch, each member has its own ingestion-event ID, status, normalized reading (when accepted), and quarantine reason (when rejected).
 
-Production vehicle, telemetry, ingestion-history, quarantine, and event APIs resolve organization ownership only from a verified API client token. Client-supplied organization IDs are ignored. The seeded `demo` organization is disabled as an auth substitute in production.
+Production vehicle, telemetry, ingestion-history, quarantine, and event APIs resolve organization ownership and access role only from a verified bearer token plus the active API-client row. Client-supplied organization IDs are ignored. The seeded `demo` organization is disabled as an auth substitute in production. API roles are `VIEWER`, `INGESTOR`, and `ADMIN`; see [ADR-008](decisions/ADR-008-api-client-roles.md).
 
 ### Atomic state UPSERT
 

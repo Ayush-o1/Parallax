@@ -1,15 +1,16 @@
 'use strict';
 
 const { Kafka, logLevel } = require('kafkajs');
+const config = require('../config/env');
 
 function brokers() {
-  const value = process.env.KAFKA_BROKERS || 'localhost:19092';
+  const value = config.kafkaBrokers || 'localhost:19092';
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
 function kafka() {
   return new Kafka({
-    clientId: process.env.KAFKA_CLIENT_ID || 'parallax',
+    clientId: config.kafkaClientId,
     brokers: brokers(),
     logLevel: logLevel.WARN,
     retry: { initialRetryTime: 300, retries: 8 },
@@ -17,8 +18,8 @@ function kafka() {
 }
 
 const topics = {
-  telemetry: process.env.KAFKA_TELEMETRY_TOPIC || 'telemetry.normalized.v1',
-  events: process.env.KAFKA_EVENTS_TOPIC || 'operational.events.v1',
+  telemetry: config.kafkaTelemetryTopic,
+  events: config.kafkaEventsTopic,
 };
 
 let topicSetup;
@@ -36,7 +37,7 @@ async function ensureTopics(client) {
       if (missing.length) await admin.createTopics({
         waitForLeaders: true,
         topics: missing.map((topic) => ({
-          topic, numPartitions: Number(process.env.KAFKA_PARTITIONS || 3), replicationFactor: 1,
+          topic, numPartitions: config.kafkaPartitions, replicationFactor: 1,
         })),
       });
     } finally {

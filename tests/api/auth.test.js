@@ -27,10 +27,10 @@ describe('client credentials and tenant authorization', () => {
     orgA = await prisma.organization.create({ data: { slug: `auth-a-${suffix}`, name: 'Auth A' } });
     orgB = await prisma.organization.create({ data: { slug: `auth-b-${suffix}`, name: 'Auth B' } });
     clientA = await prisma.apiClient.create({ data: {
-      organizationId: orgA.id, name: 'test client A', clientId: `client-a-${suffix}`, secretHash: await bcrypt.hash(secretA, 4),
+      organizationId: orgA.id, name: 'test client A', clientId: `client-a-${suffix}`, secretHash: await bcrypt.hash(secretA, 4), role: 'ADMIN',
     } });
     clientB = await prisma.apiClient.create({ data: {
-      organizationId: orgB.id, name: 'test client B', clientId: `client-b-${suffix}`, secretHash: await bcrypt.hash(secretB, 4),
+      organizationId: orgB.id, name: 'test client B', clientId: `client-b-${suffix}`, secretHash: await bcrypt.hash(secretB, 4), role: 'VIEWER',
     } });
     vehicleB = await prisma.vehicle.create({ data: { organizationId: orgB.id, vin: makeVin(), source: 'OEM_ALPHA' } });
     const tokenResponseA = await supertest(app).post('/api/v1/auth/token').send({
@@ -66,6 +66,34 @@ describe('client credentials and tenant authorization', () => {
     assert.equal(visible.status, 200);
   });
 
+  it('authenticates Socket.IO handshakes against the same tenant credential', async () => {
+    const socketAuth = require('../../src/realtime/socketAuth');
+    const socket = { handshake: { auth: { token: tokenA } }, data: {} };
+    await new Promise((resolve, reject) => socketAuth(socket, (error) => error ? reject(error) : resolve()));
+    assert.equal(socket.data.organizationId, orgA.id);
+    assert.equal(socket.data.apiClientRole, 'ADMIN');
+
+    const invalidSocket = { handshake: { auth: { token: 'invalid-token' } }, data: {} };
+    await new Promise((resolve) => socketAuth(invalidSocket, (error) => {
+      assert.match(error.message, /Unauthorized/);
+      resolve();
+    }));
+  });
+
+  it('rejects an unauthenticated Socket.IO handshake in production mode', () => {
+    const { spawnSync } = require('node:child_process');
+    const result = spawnSync(process.execPath, ['-e', `
+      const socketAuth = require('./src/realtime/socketAuth');
+      socketAuth({ handshake: { auth: {} }, data: {} }, (error) => {
+        if (!error || error.message !== 'Unauthorized') process.exit(2);
+      });
+    `], {
+      cwd: process.cwd(), encoding: 'utf8',
+      env: { ...process.env, NODE_ENV: 'production', DOTENV_CONFIG_PATH: '/dev/null' },
+    });
+    assert.equal(result.status, 0, result.stderr);
+  });
+
   it('ignores client-supplied organization IDs and applies credential revocation immediately', async () => {
     const vin = makeVin();
     const created = await supertest(app).post('/api/v1/vehicles').set('authorization', `Bearer ${tokenA}`).send({
@@ -78,5 +106,24 @@ describe('client credentials and tenant authorization', () => {
     const revoked = await supertest(app).get('/api/v1/vehicles').set('authorization', `Bearer ${tokenA}`);
     assert.equal(revoked.status, 401);
     await prisma.vehicle.delete({ where: { id: stored.id } });
+  });
+
+  it('enforces tenant-scoped API client roles for write operations', async () => {
+    const forbiddenVehicleWrite = await supertest(app).post('/api/v1/vehicles')
+      .set('authorization', `Bearer ${tokenB}`).send({ vin: makeVin(), source: 'OEM_ALPHA' });
+    const forbiddenIngest = await supertest(app).post('/api/v1/ingest/OEM_ALPHA')
+      .set('authorization', `Bearer ${tokenB}`).send({});
+    assert.equal(forbiddenVehicleWrite.status, 403);
+    assert.equal(forbiddenIngest.status, 403);
+    assert.equal(forbiddenVehicleWrite.body.error.code, 'INSUFFICIENT_ROLE');
+  });
+
+  it('rejects expired bearer tokens', async () => {
+    const { SignJWT } = await import('jose');
+    const config = require('../../src/config/env');
+    const expired = await new SignJWT({ org: orgA.id }).setProtectedHeader({ alg: 'HS256' })
+      .setSubject(clientA.id).setIssuedAt(1).setExpirationTime(2).sign(Buffer.from(config.tokenSigningSecret));
+    const response = await supertest(app).get('/api/v1/vehicles').set('authorization', `Bearer ${expired}`);
+    assert.equal(response.status, 401);
   });
 });

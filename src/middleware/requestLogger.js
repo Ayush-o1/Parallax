@@ -39,6 +39,7 @@ function requestLogger(req, res, next) {
   // Generate server-side so clients cannot spoof correlation IDs.
   const reqId = randomUUID();
   req.reqId = reqId;
+  res.setHeader('X-Request-Id', reqId);
 
   let done = false;
 

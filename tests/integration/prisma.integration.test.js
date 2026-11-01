@@ -296,4 +296,24 @@ describe('Prisma/PostgreSQL persistence integration', { concurrency: false }, ()
     assert.equal(outcome.eventResults[0].status, 'ACCEPTED');
     assert.ok(await prisma.ingestionEvent.findFirst({ where: { requestId: request.id } }));
   });
+
+  it('re-enqueues durable requests left received or processing when a worker starts', async () => {
+    const received = await createRequest({ rawBody: Buffer.from('received before queue delivery') });
+    const processing = await createRequest({ rawBody: Buffer.from('worker stopped during processing') });
+    await prisma.ingestionRequest.update({ where: { id: processing.id }, data: { status: 'PROCESSING' } });
+
+    const scheduled = [];
+    const queue = {
+      getJob: async () => null,
+      add: async (name, data, options) => { scheduled.push({ name, data, options }); },
+    };
+    const { recoverPending } = require('../../src/workers/ingestionWorker');
+    const recovered = await recoverPending(queue);
+
+    const scheduledIds = new Set(scheduled.map((job) => job.data.requestId));
+    assert.ok(recovered >= 2);
+    assert.ok(scheduledIds.has(received.id));
+    assert.ok(scheduledIds.has(processing.id));
+    assert.equal(scheduled.find((job) => job.data.requestId === received.id).options.jobId, `ingestion-${received.id}`);
+  });
 });

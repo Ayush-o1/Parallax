@@ -27,6 +27,14 @@ enum IngestionEventStatus {
   @@map("ingestion_event_status")
 }
 
+enum ApiClientRole {
+  VIEWER
+  INGESTOR
+  ADMIN
+
+  @@map("api_client_role")
+}
+
 model Organization {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   slug      String   @unique @db.VarChar(100)
@@ -49,6 +57,7 @@ model ApiClient {
   name           String    @db.VarChar(200)
   clientId       String    @unique @map("client_id") @db.VarChar(100)
   secretHash     String    @map("secret_hash") @db.VarChar(100)
+  role           ApiClientRole @default(VIEWER)
   revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
   lastUsedAt     DateTime? @map("last_used_at") @db.Timestamptz(6)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
