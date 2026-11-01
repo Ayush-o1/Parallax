@@ -12,11 +12,11 @@
 | 3 | Tenant-scoped vehicle registration and query APIs | Complete |
 | 4 | Alpha, Beta, and Gamma adapters and synthetic simulators | Complete |
 | 5–6 | Durable request receipt, independent batch outcomes, quarantine, idempotency, conditional state UPSERT, event-time odometer handling | Complete |
-| 7 | State, history, ingestion, quarantine, event, and summary APIs | Complete |
+| 7 | State, history, ingestion, quarantine, recent activity, event, and summary APIs | Complete |
 | 8 | Deterministic operational event detection and event history | Complete |
 | 9 | Hashed API client credentials, bearer tokens, revocation, organization isolation | Complete |
 | 10 | BullMQ queue, retries, dead-letter routing, recovery scan, worker shutdown | Complete; live retries, dead-letter routing, and worker processing verified |
-| 11–12 | Responsive API-backed dashboard and organization-scoped Socket.IO updates | Complete; browser smoke verified against live synthetic vehicle data |
+| 11–12 | Responsive API-backed dashboard and organization-scoped Socket.IO updates | Complete; browser flows and desktop/mobile layouts verified against authenticated live synthetic data |
 | 13 | Transactional outbox, Kafka-compatible topics, consumer groups, inbox idempotency | Complete; Redpanda publication and consumer inbox totals verified |
 | 14 | Structured logs, request IDs, Prometheus metrics, security controls, benchmark harness | Complete; all three authenticated metrics endpoints and benchmark runs verified |
 | 15 | Docker Compose, migrations/seed jobs, CI workflow, README, API/Postman docs | Complete; full local stack healthy and configuration validated |
@@ -37,12 +37,14 @@ Database commands use the guarded Prisma wrapper and non-destructive `migrate de
 ## Verification
 
 - `npm test`: 52 passing tests (8 PostgreSQL integration, 23 API, 21 unit).
+- Browser verification through the local Compose HTTP server: all stylesheet/script assets loaded; no browser console errors or warnings. Auth/connect/disconnect, overview, vehicle VIN/OEM/status filters, vehicle detail/history, ingestion outcomes/status filter/load-more, quarantine reason filter/payload inspection, and refresh all passed at desktop and 390px mobile viewport.
+- The browser smoke created 3 synthetic Alpha vehicles and a mixed accepted/quarantined batch through the existing simulator/API; no static dashboard metrics were used.
 - `npx prisma validate`: passing.
 - `docker compose config --quiet`: passing.
 - Package and Postman collection JSON parsing: passing.
 - Live Compose health reports version 0.4.0; PostgreSQL, Redis, Redpanda, API, worker, and stream services run. Metrics endpoints return 200 with the configured token and remain hidden without it.
 - Production API rejects unauthenticated requests; queue processing, retries, dead-letter routing, Kafka topics, and zero-lag consumer groups were verified.
-- The dashboard browser smoke displayed the seeded demo fleet and current telemetry. The local production dashboard requires a demo API client; the temporary smoke client was revoked after verification.
+- The local production dashboard requires an organization-owned API client. The local verification client is revoked after the browser session is disconnected.
 - The [benchmark report](benchmarks/README.md) records 1,000-event and 10,000-event runs, including worker concurrency 8/16 comparison. Both 10,000-event runs completed with zero errors and verified persistence/publication/inbox totals.
 - Final source syntax, configuration, production dependency audit, schema, and whitespace checks all passed before commit.
 

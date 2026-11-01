@@ -85,9 +85,16 @@ describe('vehicle API', () => {
     }
 
     const id = (await request.get('/api/v1/vehicles').query({ search: vins[0] })).body.data[0].id;
+    const offline = await request.get('/api/v1/vehicles').query({ search: vins[0], status: 'OFFLINE' });
+    const badStatus = await request.get('/api/v1/vehicles').query({ status: 'CONNECTED' });
+    assert.equal(offline.status, 200);
+    assert.equal(offline.body.data[0].connectivityStatus, 'OFFLINE');
+    assert.equal(badStatus.status, 400);
+    assert.equal(badStatus.body.error.code, 'INVALID_STATUS');
     const detail = await request.get(`/api/v1/vehicles/${id}`);
     assert.equal(detail.status, 200);
     assert.equal(detail.body.data.vin, vins[0]);
+    assert.equal(detail.body.data.connectivityStatus, 'OFFLINE');
     const updated = await request.patch(`/api/v1/vehicles/${id}`).send({ source: 'OEM_BETA' });
     assert.equal(updated.status, 200);
     assert.equal(updated.body.data.source, 'OEM_BETA');

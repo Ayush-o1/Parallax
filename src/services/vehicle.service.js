@@ -2,6 +2,7 @@
 
 const vehicleRepository = require('../repositories/vehicle.repository');
 const AppError = require('../utils/AppError');
+const config = require('../config/env');
 
 const SOURCES = new Set(['OEM_ALPHA', 'OEM_BETA', 'OEM_GAMMA']);
 const VIN_PATTERN = /^[A-HJ-NPR-Z0-9]{17}$/;
@@ -55,13 +56,43 @@ function parseListQuery(query) {
   }
   const source = query.source === undefined ? undefined : String(query.source);
   if (source) validateSource(source);
+  const status = query.status === undefined ? undefined : String(query.status).toUpperCase();
+  if (status && !['ACTIVE', 'STALE', 'OFFLINE'].includes(status)) {
+    throw new AppError(400, 'INVALID_STATUS', 'status must be ACTIVE, STALE, or OFFLINE.');
+  }
 
   let cursor;
   if (query.cursor !== undefined) {
     cursor = String(query.cursor);
     validateId(cursor);
   }
-  return { limit, cursor, search: search || undefined, source };
+  return { limit, cursor, search: search || undefined, source, status };
+}
+
+function statusFilter(status, now = new Date()) {
+  if (!status) return undefined;
+  if (status === 'OFFLINE') return [{ state: { is: null } }];
+  const clauses = Object.entries(config.oemReportingIntervals).map(([source, interval]) => ({
+    source,
+    state: { is: { updatedAt: status === 'ACTIVE'
+      ? { gte: new Date(now.getTime() - interval * config.staleVehicleFactor * 1000) }
+      : { lt: new Date(now.getTime() - interval * config.staleVehicleFactor * 1000) } } },
+  }));
+  const knownSources = Object.keys(config.oemReportingIntervals);
+  clauses.push({
+    source: { notIn: knownSources },
+    state: { is: { updatedAt: status === 'ACTIVE'
+      ? { gte: new Date(now.getTime() - config.staleVehicleFallbackSeconds * 1000) }
+      : { lt: new Date(now.getTime() - config.staleVehicleFallbackSeconds * 1000) } } },
+  });
+  return clauses;
+}
+
+function decorateStatus(vehicle, now = Date.now()) {
+  const lastUpdated = vehicle.state?.updatedAt?.getTime();
+  if (!lastUpdated) return { ...vehicle, connectivityStatus: 'OFFLINE' };
+  const threshold = config.staleThresholdFor(vehicle.source) * 1000;
+  return { ...vehicle, connectivityStatus: now - lastUpdated <= threshold ? 'ACTIVE' : 'STALE' };
 }
 
 async function list(organizationId, query) {
@@ -72,14 +103,18 @@ async function list(organizationId, query) {
       throw new AppError(400, 'INVALID_CURSOR', 'cursor does not identify a vehicle in this organization.');
     }
   }
-  return vehicleRepository.findPage(organizationId, options);
+  const page = await vehicleRepository.findPage(organizationId, {
+    ...options,
+    ...(options.status && { statusWhere: statusFilter(options.status) }),
+  });
+  return { ...page, items: page.items.map((vehicle) => decorateStatus(vehicle)) };
 }
 
 async function get(organizationId, id) {
   validateId(id);
   const vehicle = await vehicleRepository.findById(organizationId, id);
   if (!vehicle) throw new AppError(404, 'VEHICLE_NOT_FOUND', 'Vehicle was not found.');
-  return vehicle;
+  return decorateStatus(vehicle);
 }
 
 async function update(organizationId, id, input) {

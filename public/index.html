@@ -3,71 +3,130 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f8fb">
-  <title>Parallax | Fleet telemetry</title>
-  <link rel="stylesheet" href="/styles.css">
+  <meta name="theme-color" content="#f5f7fa">
+  <meta name="description" content="Parallax fleet telemetry monitoring dashboard">
+  <title>Parallax — Fleet operations</title>
+  <link rel="stylesheet" href="styles.css?v=0.4.1">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Main navigation">
       <a class="brand" href="#overview" aria-label="Parallax overview">
-        <span class="brand-mark" aria-hidden="true">P</span><span>parallax</span>
+        <span class="brand-mark" aria-hidden="true">P</span>
+        <span class="brand-name">parallax</span>
+        <span class="brand-edition">FLEET</span>
       </a>
-      <p class="nav-caption">MONITORING</p>
-      <nav>
-        <button class="nav-link active" data-view="overview"><span>▦</span> Overview</button>
-        <button class="nav-link" data-view="vehicles"><span>◫</span> Vehicles</button>
-        <button class="nav-link" data-view="ingestion"><span>⇣</span> Ingestion</button>
-        <button class="nav-link" data-view="quarantine"><span>⚑</span> Quarantine</button>
-      </nav>
-      <div class="sidebar-bottom">
-        <div class="system-state"><span class="pulse-dot"></span><span><strong id="system-label">Checking services</strong><small id="last-refresh">—</small></span></div>
-        <button id="credentials-toggle" class="text-button">API credentials</button>
+      <div class="sidebar-section">
+        <p class="nav-caption">WORKSPACE</p>
+        <nav class="primary-nav" aria-label="Monitoring">
+          <button class="nav-link active" type="button" data-view="overview"><span class="nav-icon" aria-hidden="true">▦</span>Overview</button>
+          <button class="nav-link" type="button" data-view="vehicles"><span class="nav-icon" aria-hidden="true">◫</span>Vehicles</button>
+          <button class="nav-link" type="button" data-view="ingestion"><span class="nav-icon" aria-hidden="true">⇣</span>Ingestion</button>
+          <button class="nav-link" type="button" data-view="quarantine"><span class="nav-icon" aria-hidden="true">⚑</span>Quarantine</button>
+        </nav>
+      </div>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-footer">
+        <div class="connection-card">
+          <span class="connection-dot checking" id="connection-dot" aria-hidden="true"></span>
+          <div class="connection-copy"><strong id="system-label" role="status" aria-live="polite">Checking services</strong><span id="last-refresh">Waiting for API</span></div>
+        </div>
+        <button id="credentials-toggle" class="sidebar-action" type="button">API credentials</button>
+        <div class="sidebar-version">PARALLAX <span>0.4</span></div>
       </div>
     </aside>
 
     <main class="main-content">
       <header class="topbar">
-        <div><span class="eyebrow">FLEET OPERATIONS</span><h1 id="page-title">Overview</h1></div>
-        <div class="topbar-actions"><span class="environment-tag" id="tenant-label">Demo organization</span><button id="credentials-open" class="button secondary">Connect</button><button id="refresh-button" class="button secondary">Refresh</button></div>
+        <div class="page-heading"><p class="eyebrow">FLEET OPERATIONS</p><h1 id="page-title">Overview</h1></div>
+        <div class="topbar-actions">
+          <span class="tenant-tag" id="tenant-label"><span class="tenant-avatar">O</span><span>Organization</span></span>
+          <button id="credentials-open" class="button secondary" type="button"><span aria-hidden="true">↗</span> Connect</button>
+          <button id="disconnect-button" class="button secondary hidden" type="button">Disconnect</button>
+          <button id="refresh-button" class="button primary" type="button"><span aria-hidden="true">↻</span> Refresh</button>
+        </div>
       </header>
 
       <section id="credentials-panel" class="credentials-panel hidden" aria-labelledby="credentials-title">
-        <div><h2 id="credentials-title">Connect an API client</h2><p>Credentials are exchanged for a short-lived token and kept in this browser tab only.</p></div>
+        <div class="credentials-intro"><span class="section-kicker">SECURE ACCESS</span><h2 id="credentials-title">Connect an API client</h2><p>Exchange tenant credentials for a short-lived token. The token stays in this browser tab.</p></div>
         <form id="credentials-form">
-          <label>Client ID<input name="client_id" autocomplete="username" required></label>
-          <label>Client secret<input name="client_secret" type="password" autocomplete="current-password" required></label>
-          <button class="button primary" type="submit">Connect</button>
+          <label for="client-id">Client ID<input id="client-id" name="client_id" autocomplete="username" required></label>
+          <label for="client-secret">Client secret<input id="client-secret" name="client_secret" type="password" autocomplete="current-password" required></label>
+          <button class="button primary" type="submit">Connect securely</button>
         </form>
-        <p id="credentials-message" class="form-message" role="status"></p>
+        <p id="credentials-message" class="form-message" role="status" aria-live="polite"></p>
       </section>
 
       <div id="error-banner" class="error-banner hidden" role="alert"></div>
 
-      <section id="view-overview" class="view">
+      <section id="view-overview" class="view" aria-labelledby="page-title">
+        <div class="section-intro"><div><h2>Fleet at a glance</h2><p>Current vehicle health and telemetry activity for this organization.</p></div><span class="data-freshness" id="overview-freshness">Live data</span></div>
         <div class="metric-grid" id="metrics" aria-live="polite"></div>
-        <div class="content-grid">
-          <article class="panel"><div class="panel-heading"><div><h2>Vehicles</h2><p>Latest reported state by registered vehicle</p></div><button class="text-button" data-view="vehicles">View all →</button></div><div id="overview-vehicles" class="table-wrap"></div></article>
-          <article class="panel source-panel"><div class="panel-heading"><div><h2>By source</h2><p>Registered fleet distribution</p></div></div><div id="source-breakdown" class="source-breakdown"></div><div class="panel-divider"></div><h3>Recent operational events</h3><div id="overview-events" class="event-list"></div></article>
+        <div class="content-grid overview-grid">
+          <article class="panel fleet-panel">
+            <div class="panel-heading"><div><h2>Fleet status</h2><p>Latest reported reading by vehicle</p></div><button class="text-button" type="button" data-view="vehicles">View vehicles <span aria-hidden="true">→</span></button></div>
+            <div id="overview-vehicles" class="table-wrap"></div>
+          </article>
+          <article class="panel source-panel">
+            <div class="panel-heading"><div><h2>Vehicles by OEM</h2><p>Registered fleet distribution</p></div></div>
+            <div id="source-breakdown" class="source-breakdown"></div>
+            <div class="panel-divider"></div>
+            <div class="panel-subheading"><h3>Recent operational events</h3><span class="subtle-label">Latest activity</span></div>
+            <div id="overview-events" class="event-list"></div>
+          </article>
         </div>
+        <article class="panel recent-panel">
+          <div class="panel-heading"><div><h2>Recent telemetry</h2><p>Most recently received vehicle readings</p></div><span class="subtle-label">Event time</span></div>
+          <div id="recent-readings" class="table-wrap"></div>
+        </article>
       </section>
 
-      <section id="view-vehicles" class="view hidden">
-        <article class="panel"><div class="panel-heading"><div><h2>Registered vehicles</h2><p>Search and inspect vehicle telemetry</p></div><div class="filters"><input id="vehicle-search" type="search" placeholder="Search VIN" aria-label="Search VIN"><select id="source-filter" aria-label="Filter by OEM"><option value="">All OEMs</option><option>OEM_ALPHA</option><option>OEM_BETA</option><option>OEM_GAMMA</option></select></div></div><div id="vehicles-table" class="table-wrap"></div></article>
-        <article id="vehicle-detail" class="panel detail-panel hidden"></article>
+      <section id="view-vehicles" class="view hidden" aria-labelledby="page-title">
+        <div class="section-intro"><div><h2>Vehicle registry</h2><p>Search the fleet, filter by connection state, and inspect telemetry history.</p></div></div>
+        <article class="panel">
+          <div class="toolbar">
+            <div class="toolbar-copy"><h2>Registered vehicles</h2><span id="vehicle-result-count" class="subtle-label"></span></div>
+            <div class="filters">
+              <label class="sr-only" for="vehicle-search">Search by VIN</label><input id="vehicle-search" type="search" placeholder="Search VIN" autocomplete="off">
+              <label class="sr-only" for="source-filter">Filter by OEM</label><select id="source-filter"><option value="">All OEMs</option><option value="OEM_ALPHA">OEM Alpha</option><option value="OEM_BETA">OEM Beta</option><option value="OEM_GAMMA">OEM Gamma</option></select>
+              <label class="sr-only" for="vehicle-status-filter">Filter by vehicle status</label><select id="vehicle-status-filter"><option value="">All statuses</option><option value="ACTIVE">Active</option><option value="STALE">Stale</option><option value="OFFLINE">Offline</option></select>
+            </div>
+          </div>
+          <div id="vehicles-table" class="table-wrap"></div>
+          <div id="vehicles-pagination" class="pagination"></div>
+        </article>
+        <article id="vehicle-detail" class="panel detail-panel hidden" aria-live="polite"></article>
       </section>
 
-      <section id="view-ingestion" class="view hidden">
-        <article class="panel"><div class="panel-heading"><div><h2>Ingestion requests</h2><p>Receipt status and batch outcomes</p></div><select id="ingestion-status"><option value="">All statuses</option><option>PROCESSING</option><option>COMPLETED</option><option>COMPLETED_WITH_ERRORS</option><option>MALFORMED</option></select></div><div id="ingestion-table" class="table-wrap"></div></article>
+      <section id="view-ingestion" class="view hidden" aria-labelledby="page-title">
+        <div class="section-intro"><div><h2>Ingestion activity</h2><p>Every HTTP receipt is retained separately from its event outcomes.</p></div></div>
+        <article class="panel">
+          <div class="toolbar">
+            <div class="toolbar-copy"><h2>Ingestion requests</h2><span class="subtle-label">Batch outcomes are summarized per request</span></div>
+            <div class="filters"><label class="sr-only" for="ingestion-status">Filter by request status</label><select id="ingestion-status"><option value="">All statuses</option><option>RECEIVED</option><option>PROCESSING</option><option>COMPLETED</option><option>COMPLETED_WITH_ERRORS</option><option>MALFORMED</option></select></div>
+          </div>
+          <div id="ingestion-table" class="table-wrap"></div>
+          <div id="ingestion-pagination" class="pagination"></div>
+        </article>
       </section>
 
-      <section id="view-quarantine" class="view hidden">
-        <article class="panel"><div class="panel-heading"><div><h2>Quarantined data</h2><p>Rejected requests and event payloads with reasons</p></div><input id="quarantine-reason" type="search" placeholder="Filter reason" aria-label="Filter quarantine reason"></div><div id="quarantine-table" class="table-wrap"></div></article>
+      <section id="view-quarantine" class="view hidden" aria-labelledby="page-title">
+        <div class="section-intro"><div><h2>Quarantine review</h2><p>Inspect rejected requests and event payloads with their validation context.</p></div></div>
+        <article class="panel">
+          <div class="toolbar">
+            <div class="toolbar-copy"><h2>Quarantined data</h2><span class="subtle-label">Duplicate receipts are shown in ingestion outcomes, not as invalid data.</span></div>
+            <div class="filters"><label class="sr-only" for="quarantine-reason">Filter by reason</label><input id="quarantine-reason" type="search" placeholder="Filter by reason" autocomplete="off"></div>
+          </div>
+          <div id="quarantine-table" class="table-wrap"></div>
+          <div id="quarantine-pagination" class="pagination"></div>
+        </article>
       </section>
-      <footer>Parallax · Synthetic telemetry monitoring · <span id="footer-time"></span></footer>
+
+      <footer><span>Parallax Fleet Monitoring</span><span>All telemetry is synthetic demo data.</span><span id="footer-time"></span></footer>
     </main>
   </div>
+  <noscript><p class="noscript-message">Enable JavaScript to use the Parallax monitoring dashboard.</p></noscript>
   <script src="/socket.io/socket.io.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="app.js?v=0.4.1" defer></script>
 </body>
 </html>

@@ -83,9 +83,12 @@ Supported event outcomes are `ACCEPTED`, `ACCEPTED_WITH_WARNINGS`, `QUARANTINED`
 
 | Method and path | Behavior |
 |---|---|
-| `GET /api/v1/summary` | Live tenant counts: registered, active/stale, ingestion statuses, quarantine count, and source distribution. |
-| `GET /api/v1/ingestions?limit=50&cursor=<uuid>&status=PROCESSING` | Tenant-scoped request lifecycle and child counts. |
-| `GET /api/v1/quarantine?limit=50&cursor=<uuid>&reason=UNKNOWN_VIN` | Request/event rejection detail, parsed event payload if available, original UTF-8 request text and exact raw body Base64. |
+| `GET /api/v1/summary` | Resolved organization name/slug plus live counts: registered, active/stale, ingestion statuses, quarantine count, and source distribution. |
+| `GET /api/v1/vehicles?limit=25&cursor=<uuid>&search=<vin>&source=OEM_ALPHA&status=ACTIVE` | Tenant-scoped vehicle list; status is `ACTIVE`, `STALE`, or `OFFLINE` using the configured per-OEM reporting thresholds. |
+| `GET /api/v1/telemetry/recent?limit=10&cursor=<uuid>` | Recent normalized telemetry across the authenticated organization, with vehicle identifiers. |
+| `GET /api/v1/events/recent?limit=8&cursor=<uuid>` | Recent operational events across the authenticated organization, with vehicle identifiers. |
+| `GET /api/v1/ingestions?limit=50&cursor=<uuid>&status=PROCESSING` | Tenant-scoped request lifecycle, child counts, and event outcomes grouped by status. |
+| `GET /api/v1/quarantine?limit=50&cursor=<uuid>&reason=VIN` | Request/event rejection detail, parsed event payload if available, original UTF-8 request text and exact raw body Base64. Reason filtering is case-insensitive substring search. |
 | `GET /api/v1/vehicles/:vehicleId/state` | Latest event-time reading and trusted odometer. Returns `data: null` before the first accepted reading. |
 | `GET /api/v1/vehicles/:vehicleId/telemetry?from=<ISO>&to=<ISO>&limit=50&cursor=<uuid>` | Event-time descending historical page. From/to are inclusive. |
 | `GET /api/v1/vehicles/:vehicleId/events?limit=50&cursor=<uuid>` | Derived operational event page. |

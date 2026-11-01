@@ -9,6 +9,7 @@ const vehicleSelect = {
   createdAt: true,
   updatedAt: true,
   state: { select: {
+    updatedAt: true,
     lastEventTime: true,
     trustedOdometerKm: true,
     latestReading: { select: {
@@ -39,11 +40,12 @@ function update(organizationId, id, data) {
   });
 }
 
-async function findPage(organizationId, { limit, cursor, search, source }) {
+async function findPage(organizationId, { limit, cursor, search, source, statusWhere }) {
   const where = {
     organizationId,
     ...(source && { source }),
     ...(search && { vin: { contains: search, mode: 'insensitive' } }),
+    ...(statusWhere && { OR: statusWhere }),
   };
 
   const rows = await prisma.vehicle.findMany({

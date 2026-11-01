@@ -140,13 +140,15 @@ describe('telemetry ingestion', () => {
     const vehicle = await register(vehicleVin);
     const accepted = await post(alphaPayload(vehicleVin, `query-${crypto.randomUUID()}`));
     const rejected = await post({ ...alphaPayload(vehicleVin, `query-bad-${crypto.randomUUID()}`), latitude: 95 });
-    const [stateResponse, history, events, summary, ingestions, quarantine] = await Promise.all([
+    const [stateResponse, history, events, summary, ingestions, quarantine, recentTelemetry, recentEvents] = await Promise.all([
       supertest(app).get(`/api/v1/vehicles/${vehicle.id}/state`),
       supertest(app).get(`/api/v1/vehicles/${vehicle.id}/telemetry`).query({ limit: 10 }),
       supertest(app).get(`/api/v1/vehicles/${vehicle.id}/events`).query({ limit: 10 }),
       supertest(app).get('/api/v1/summary'),
       supertest(app).get('/api/v1/ingestions'),
       supertest(app).get('/api/v1/quarantine').query({ reason: 'OUT_OF_RANGE' }),
+      supertest(app).get('/api/v1/telemetry/recent').query({ limit: 10 }),
+      supertest(app).get('/api/v1/events/recent').query({ limit: 10 }),
     ]);
     assert.equal(accepted.body.data.eventResults[0].status, 'ACCEPTED');
     assert.equal(rejected.body.data.eventResults[0].status, 'QUARANTINED');
@@ -156,9 +158,15 @@ describe('telemetry ingestion', () => {
     assert.equal(events.status, 200);
     assert.equal(summary.status, 200);
     assert.ok(summary.body.data.vehicles.total >= 1);
+    assert.equal(summary.body.data.organization.slug, 'demo');
     assert.ok(ingestions.body.data.length >= 2);
     assert.equal(quarantine.status, 200);
     assert.ok(quarantine.body.data.some((item) => item.rawRequestBase64));
+    assert.ok(ingestions.body.data.some((item) => item.outcomes?.QUARANTINED));
+    assert.equal(recentTelemetry.status, 200);
+    assert.ok(recentTelemetry.body.data.some((item) => item.vehicle.id === vehicle.id));
+    assert.equal(recentEvents.status, 200);
+    assert.ok(Array.isArray(recentEvents.body.data));
   });
 
   it('detects trip end and excessive idling only after their event-time durations', async () => {

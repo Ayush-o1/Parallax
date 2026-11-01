@@ -8,6 +8,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const router = Router();
 router.use(organizationContext);
 router.get('/summary', asyncHandler(controller.summary));
+router.get('/telemetry/recent', asyncHandler(controller.recent));
+router.get('/events/recent', asyncHandler(controller.recentEvents));
 router.get('/ingestions', asyncHandler(controller.history));
 router.get('/quarantine', asyncHandler(controller.quarantines));
 router.get('/vehicles/:vehicleId/state', asyncHandler(controller.state));

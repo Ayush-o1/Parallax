@@ -115,7 +115,7 @@ Compose starts PostgreSQL, Redis, Redpanda, migrations, demo seed, the API/dashb
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Redpanda's Kafka listener is exposed on port `19092`; the internal services connect to `redpanda:9092`. PostgreSQL, Redis, and Redpanda use named volumes. Database init creates separate `parallax_dev` and `parallax_test` databases.
+Open [http://localhost:3000](http://localhost:3000). Use the HTTP URL; opening `public/index.html` as a local file bypasses Express and prevents API calls. The stylesheet uses a project-relative asset path so the light UI still loads in a file preview. Redpanda's Kafka listener is exposed on port `19092`; the internal services connect to `redpanda:9092`. PostgreSQL, Redis, and Redpanda use named volumes. Database init creates separate `parallax_dev` and `parallax_test` databases.
 
 Use `docker compose down` to stop the stack while preserving data. `docker compose down -v` removes its named data volumes and should only be used when you intentionally want to remove local Compose data.
 
@@ -170,11 +170,13 @@ The dashboard's **Connect** panel accepts client credentials and keeps only the 
 |---|---|---|
 | `POST` | `/api/v1/auth/token` | Client-credentials bearer token |
 | `POST` | `/api/v1/vehicles` | Register VIN and OEM source |
-| `GET` | `/api/v1/vehicles?limit=25&cursor=…&search=…&source=…` | Tenant-scoped vehicle list |
+| `GET` | `/api/v1/vehicles?limit=25&cursor=…&search=…&source=…&status=ACTIVE` | Tenant-scoped vehicle list; supports `ACTIVE`, `STALE`, and `OFFLINE` status filters |
 | `GET` | `/api/v1/vehicles/:vehicleId` | Vehicle details |
 | `PATCH` | `/api/v1/vehicles/:vehicleId` | Update supported source metadata |
 | `POST` | `/api/v1/ingest/:source` | Ingest one event or a batch; preserves raw bytes first |
 | `GET` | `/api/v1/summary` | Dashboard counts and source distribution |
+| `GET` | `/api/v1/telemetry/recent?limit=10&cursor=…` | Recent normalized telemetry across the resolved organization |
+| `GET` | `/api/v1/events/recent?limit=8&cursor=…` | Recent operational events across the resolved organization |
 | `GET` | `/api/v1/ingestions?status=…` | Request history and batch counts |
 | `GET` | `/api/v1/quarantine?reason=…` | Quarantine details and original body bytes as Base64 |
 | `GET` | `/api/v1/vehicles/:vehicleId/state` | Current state and trusted odometer |

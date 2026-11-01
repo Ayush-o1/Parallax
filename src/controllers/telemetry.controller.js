@@ -16,4 +16,6 @@ module.exports = {
   summary: (req, res) => send(telemetryService.summary(req.organizationId), res),
   history: (req, res) => send(telemetryService.history(req.organizationId, req.query), res),
   quarantines: (req, res) => send(telemetryService.quarantines(req.organizationId, req.query), res),
+  recent: (req, res) => send(telemetryService.recentReadings(req.organizationId, req.query), res),
+  recentEvents: (req, res) => send(telemetryService.recentEvents(req.organizationId, req.query), res),
 };

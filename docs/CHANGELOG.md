@@ -15,12 +15,17 @@ Format: `[version] — date`
 - Redis/BullMQ asynchronous processing with retries, dead-letter routing, raw-request recovery, and explicit `ioredis` runtime dependency.
 - Transactional outbox, Kafka-compatible topic publishing, realtime/analytics consumer groups, inbox idempotency, and per-process Prometheus metrics.
 - Docker Compose stack, CI workflow, API guide, Postman collection, and reproducible benchmark harness/reports.
+- A professional, responsive fleet dashboard with API-fed overview and recent activity, vehicle health filters and history inspection, batch outcomes, quarantine payload review, loading/error/empty feedback, and authenticated Socket.IO status.
+- Tenant-scoped recent telemetry and recent operational-event routes; API-side vehicle connectivity status filtering; event-outcome counts per ingestion request; case-insensitive quarantine reason filtering.
+- Browser-verified desktop and 390px mobile flows against the running Compose stack, including connect/disconnect, refresh, VIN/OEM/status filters, vehicle details, ingestion filtering and pagination, and quarantine reason/payload inspection. The Alpha simulator and a mixed accepted/quarantined request supplied live synthetic data.
 
 ### Fixed
 - Reprocessing persisted requests now reloads committed parse state before event extraction, preventing duplicate event ordinals.
 - Replay decodes compressed request bodies from persisted raw bytes, and normalized VIN fixtures now match the adapter's canonical uppercase form.
 - Docker's Redpanda health check uses supported `rpk` flags; topic creation is shared across concurrently starting Kafka clients.
 - Prisma Docker images install OpenSSL so the generated PostgreSQL engine matches the runtime.
+- Dashboard assets use project-relative CSS and JavaScript paths so local previews retain their styles; live API functionality uses the Express HTTP URL. Auth form submission retains its form element across the token request.
+- Browser console and asset inventory were clean during local HTTP verification; dashboard, stylesheet, app script, and Socket.IO client all loaded successfully.
 
 ### Measured
 - Ran 1,000 direct and 1,000 batch events with the full Compose queue and Kafka paths.
