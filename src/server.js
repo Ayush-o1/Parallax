@@ -22,11 +22,25 @@
 
 const config = require('./config/env');
 const logger = require('./utils/logger');
+const http = require('node:http');
+const { Server: SocketServer } = require('socket.io');
+const socketAuth = require('./realtime/socketAuth');
+const realtimeHub = require('./realtime/hub');
+const prisma = require('./db/prisma');
 
 config.validateConfig();
 const app = require('./app');
 
-const server = app.listen(config.port, () => {
+const server = http.createServer(app);
+const io = new SocketServer(server, { cors: { origin: false }, serveClient: true });
+io.use(socketAuth);
+io.on('connection', (socket) => {
+  // Every socket joins exactly one server-resolved tenant room.
+  socket.join(`organization:${socket.data.organizationId}`);
+});
+realtimeHub.attach(io);
+
+server.listen(config.port, () => {
   logger.info('parallax server started', {
     port:    config.port,
     nodeEnv: config.nodeEnv,
@@ -60,8 +74,11 @@ function shutdown(signal, exitCode = 0) {
 
   server.close(() => {
     clearTimeout(forceExitTimer);
-    logger.info('all connections closed, process exiting');
-    process.exit(exitCode);
+    io.close(async () => {
+      await prisma.$disconnect();
+      logger.info('all connections closed, process exiting');
+      process.exit(exitCode);
+    });
   });
 }
 

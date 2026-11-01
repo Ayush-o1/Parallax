@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: parallax_app
+          POSTGRES_PASSWORD: parallax_test_secret
+          POSTGRES_DB: parallax_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U parallax_app -d parallax_dev"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://parallax_app:parallax_test_secret@localhost:5432/parallax_dev
+      TEST_DATABASE_URL: postgresql://parallax_app:parallax_test_secret@localhost:5432/parallax_test
+      TOKEN_SIGNING_SECRET: ci-only-signing-secret-32-bytes-minimum
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Create isolated test database
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE parallax_test'
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Run migrations and test suites
+        run: npm test
+      - name: Check JavaScript syntax and whitespace
+        run: |
+          find src scripts tests prisma -name '*.js' -print0 | xargs -0 -n1 node --check
+          git diff --check

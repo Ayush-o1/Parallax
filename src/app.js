@@ -24,22 +24,37 @@
 
 const express = require('express');
 const path    = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const crypto = require('node:crypto');
 
 const config         = require('./config/env');
 const requestLogger  = require('./middleware/requestLogger');
 const errorHandler   = require('./middleware/errorHandler');
 const healthRoutes   = require('./routes/health.routes');
+const vehicleRoutes  = require('./routes/vehicle.routes');
+const ingestionRoutes = require('./routes/ingest.routes');
+const telemetryRoutes = require('./routes/telemetry.routes');
+const authRoutes = require('./routes/auth.routes');
+const { registry, requestMetrics } = require('./middleware/requestMetrics');
 
 const app = express();
+app.use(helmet({ contentSecurityPolicy: { directives: {
+  ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+  connectSrc: ["'self'", 'ws:', 'wss:'],
+} } }));
 
 // ── Request logging ────────────────────────────────────────────────────────
 // Register before body parsing so malformed and oversized JSON requests are
 // captured too.
 app.use(requestLogger);
+app.use(requestMetrics);
+app.use('/api/v1', rateLimit({ windowMs: 60_000, limit: Number(process.env.API_RATE_LIMIT_PER_MINUTE || 1200), standardHeaders: true, legacyHeaders: false }));
 
-// ── Body parsing ───────────────────────────────────────────────────────────
-// Parse JSON request bodies. We enforce a maximum size here to guard
-// against accidental or malicious oversized payloads.
+// Ingestion captures raw bytes before JSON parsing or content decompression.
+app.use('/api/v1/ingest', ingestionRoutes);
+
+// Parse JSON for the regular API after the raw-ingestion route is mounted.
 app.use(express.json({ limit: config.maxPayloadBytes }));
 
 // ── Static files (frontend dashboard) ─────────────────────────────────────
@@ -50,12 +65,24 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 app.use('/health', healthRoutes);
-
-// Additional route groups will be mounted here as phases progress:
-// app.use('/api/v1/vehicles',   vehicleRoutes);
-// app.use('/api/v1/ingest',     ingestionRoutes);
-// app.use('/api/v1/telemetry',  telemetryRoutes);
-// app.use('/api/v1/events',     eventRoutes);
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/vehicles', vehicleRoutes);
+app.use('/api/v1', telemetryRoutes);
+app.get('/metrics', async (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    const expected = process.env.METRICS_TOKEN || '';
+    const supplied = req.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
+    const expectedBuffer = Buffer.from(expected);
+    const suppliedBuffer = Buffer.from(supplied);
+    if (!expected || expectedBuffer.length !== suppliedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+      return res.status(404).end();
+    }
+  }
+  try {
+    res.set('Content-Type', registry.contentType);
+    return res.send(await registry.metrics());
+  } catch (error) { return next(error); }
+});
 
 // ── 404 handler ────────────────────────────────────────────────────────────
 // Any request that reaches here did not match a registered route.

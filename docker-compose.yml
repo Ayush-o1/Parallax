@@ -1,0 +1,150 @@
+name: parallax
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: parallax_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-parallax_dev_secret}
+      POSTGRES_DB: parallax_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parallax_app -d parallax_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.6
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --default-log-level=info
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+      - "19644:9644"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["node", "scripts/prisma-command.js", "migrate", "deploy"]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
+      TEST_DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    build: .
+    command: ["node", "scripts/prisma-command.js", "db", "seed"]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
+      TEST_DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_test
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  app:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-local-compose-signing-secret-please-change-before-deployment}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: redpanda:9092
+      API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-1200}
+    ports:
+      - "3000:3000"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build: .
+    command: ["node", "scripts/worker.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-local-compose-signing-secret-please-change-before-deployment}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      REDIS_URL: redis://redis:6379
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-16}
+      WORKER_METRICS_PORT: 9465
+    ports:
+      - "9465:9465"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  stream:
+    build: .
+    command: ["node", "scripts/streaming.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://parallax_app:${POSTGRES_PASSWORD:-parallax_dev_secret}@postgres:5432/parallax_dev
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:-local-compose-signing-secret-please-change-before-deployment}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_PARTITIONS: 3
+      STREAM_METRICS_PORT: 9466
+    ports:
+      - "9466:9466"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  redpanda-data:

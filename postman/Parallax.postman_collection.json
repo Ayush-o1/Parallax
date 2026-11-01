@@ -1,0 +1,69 @@
+{
+  "info": {
+    "name": "Parallax Telemetry API",
+    "description": "Local API workflow. Set baseUrl; local demo mode uses no token. For production-like mode, set clientId/clientSecret, run Issue access token, and enable the Authorization headers on protected requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "token", "value": "" },
+    { "key": "clientId", "value": "" },
+    { "key": "clientSecret", "value": "" },
+    { "key": "source", "value": "OEM_ALPHA" },
+    { "key": "vehicleId", "value": "" },
+    { "key": "vehicleVin", "value": "1HGBH41JXMN109186" }
+  ],
+  "item": [
+    {
+      "name": "Issue access token",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"grant_type\": \"client_credentials\",\n  \"client_id\": \"{{clientId}}\",\n  \"client_secret\": \"{{clientSecret}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/api/v1/auth/token"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('client credentials issue a bearer token', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().data.access_token);"] } }]
+    },
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health" },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('health is OK', () => pm.response.to.have.status(200));"] } }]
+    },
+    {
+      "name": "Register vehicle",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}", "disabled": true }],
+        "body": { "mode": "raw", "raw": "{\n  \"vin\": \"{{vehicleVin}}\",\n  \"source\": \"{{source}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/api/v1/vehicles"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if (pm.response.code === 201) pm.collectionVariables.set('vehicleId', pm.response.json().data.id);", "pm.test('vehicle registered or already exists', () => pm.expect([201, 409]).to.include(pm.response.code));"] } }]
+    },
+    {
+      "name": "Ingest Alpha telemetry",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}", "disabled": true }],
+        "body": { "mode": "raw", "raw": "{\n  \"vin\": \"{{vehicleVin}}\",\n  \"speed\": 60,\n  \"speed_unit\": \"mph\",\n  \"odometer\": 12500,\n  \"latitude\": 12.9716,\n  \"longitude\": 77.5946,\n  \"fuel_level\": 74,\n  \"engine_on\": true,\n  \"event_id\": \"ALPHA-{{$guid}}\",\n  \"timestamp\": \"{{$isoTimestamp}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/api/v1/ingest/{{source}}"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('ingest accepted or reported per-event outcome', () => pm.expect([200, 207, 202]).to.include(pm.response.code));"] } }]
+    },
+    {
+      "name": "List vehicles",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "disabled": true }], "url": "{{baseUrl}}/api/v1/vehicles?limit=25" }
+    },
+    {
+      "name": "Vehicle state",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "disabled": true }], "url": "{{baseUrl}}/api/v1/vehicles/{{vehicleId}}/state" }
+    },
+    {
+      "name": "Dashboard summary",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "disabled": true }], "url": "{{baseUrl}}/api/v1/summary" }
+    },
+    {
+      "name": "Quarantine history",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "disabled": true }], "url": "{{baseUrl}}/api/v1/quarantine?limit=25" }
+    }
+  ]
+}

@@ -36,9 +36,17 @@ Independent event transactions prevent one bad batch member from rolling back it
 
 Use a PostgreSQL `INSERT ... ON CONFLICT (vehicle_id) DO UPDATE ... WHERE current.last_event_time < EXCLUDED.last_event_time`. The unique conflict serializes concurrent writes on the vehicle-state row; PostgreSQL evaluates the condition against the current locked row. No application-level read-compare-write is used.
 
+### Event identifier scope and odometer ordering
+
+The documented OEM identifiers are unique per vehicle, not across a whole source. The reading constraint is therefore `(source, vehicle_id, external_event_id)`. Gamma's sequence is per vehicle; its canonical ID includes the VIN for clarity, while vehicle ID remains a separate uniqueness component. Do not tighten this scope without an explicit source-wide OEM guarantee.
+
+State ordering and odometer anomaly detection use `eventTime`. A late event is stored in history but is not compared to the trusted latest odometer. A newer suspicious odometer is retained with `odometer_suspicious=true`, quarantined, and excluded from the trusted odometer update; valid speed, location, and fuel from that event can still become latest state.
+
 ### Derived-event deduplication
 
 Each derived event has a unique deterministic `dedupe_key` built from event type, vehicle ID, source, and stable per-vehicle external event ID for the trigger boundary. This remains stable across retries even if a database-generated reading UUID changes. Examples are defined in `docs/data-contracts.md` §13.
+
+Every vehicle, request, and API client has an organization foreign key. Local development resolves the seeded `demo` tenant server-side. Production resolves it from verified credentials; no client-provided organization identifier is trusted.
 
 ## Consequences
 

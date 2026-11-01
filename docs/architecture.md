@@ -1,8 +1,8 @@
 # Parallax — Architecture
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 
-**Status:** Phase 2 — Schema Draft
+**Status:** Phases 0–15 implementation complete; runtime verification is tracked in `docs/PROJECT_STATUS.md`
 **Last updated:** 2026-11-01
 
 ---
@@ -182,12 +182,15 @@ src/
 |--------|---------|-----------------|
 | `organizations` | Vehicle owner; seeded demo organization for local use | UUID PK; unique slug |
 | `vehicles` | Registered vehicle with mandatory organization | UUID PK; FK organization; unique `(organization_id, vin)` |
-| `ingestion_requests` | One organization-scoped HTTP request and its original body | UUID PK; FK organization; `BYTEA` body; optional parsed `JSONB`; source is string |
+| `ingestion_requests` | One organization-scoped HTTP request and its original body | UUID PK; FK organization; `BYTEA` body; optional parsed `JSONB`; string source and content-encoding metadata |
 | `ingestion_events` | One extracted event and independent outcome | UUID PK; FK request; unique `(request_id, ordinal)` |
 | `telemetry_readings` | Accepted normalized event and odometer flag | UUID PK; unique event FK; unique `(source, vehicle_id, external_event_id)` |
 | `vehicle_states` | One latest state per vehicle and trusted odometer | UUID PK; unique vehicle; conditional UPSERT target |
 | `derived_events` | Operational events with deterministic dedupe key | UUID PK; unique dedupe key |
 | `quarantine_records` | Request- or event-level rejection record | Required request FK; nullable event and vehicle FKs |
+| `api_clients` | Organization-scoped client credential used for bearer access tokens | UUID PK; unique client ID; revocable credential tied to one organization |
+| `outbox_events` | Durable publication intent committed with telemetry/event changes | Unique deterministic key; claim lease; organization and vehicle scope |
+| `kafka_inbox` | Idempotency ledger for each stream consumer group | Unique `(consumer_group, event_key)` and `(consumer_group, topic, partition, offset)` |
 
 ### Lifecycle and transaction boundaries
 
@@ -207,7 +210,11 @@ All primary and foreign identifiers use PostgreSQL UUID with database-side `gen_
 
 Every vehicle and ingestion request has a required organization FK. Unauthenticated local development uses a seeded organization with slug `demo`. The request is attributed to that organization for quarantine and audit queries. Authentication must derive organization ownership from verified credentials; clients cannot choose an arbitrary organization ID.
 
-## 8. Technology Decisions
+## 8. Vehicle and organization ownership
+
+`Vehicle.organization_id` is mandatory and every repository query is constrained by the organization resolved by middleware. Local development resolves the seeded `demo` tenant on the server. Production requests require verified bearer credentials; the organization comes from the credential's database record and signed token claims. Client-supplied organization IDs are never used to scope reads or writes. Each `ApiClient` belongs to exactly one organization and can be revoked.
+
+## 9. Technology Decisions
 
 | Decision | Choice | Reason |
 |----------|--------|--------|
@@ -221,13 +228,18 @@ Every vehicle and ingestion request has a required organization FK. Unauthentica
 
 ---
 
-## 9. Deferred Architecture Decisions
+## 10. Deferred Architecture Decisions
 
 | Decision | Deferred until |
 |----------|---------------|
-| Redis / BullMQ for background processing | Phase 10 |
-| Socket.IO for real-time updates | Phase 12 |
-| Kafka for distributed event streaming | Phase 13 |
 | PostGIS for geospatial queries | If geofencing requirements emerge |
-| OpenAPI / Swagger documentation | Phase 15 |
+| OpenAPI / Swagger schema and interactive UI | If client integration needs exceed the maintained API guide and Postman collection |
+
+## 11. Asynchronous jobs and streaming
+
+When `REDIS_URL` is configured, HTTP ingestion commits the raw request and pending event rows, then queues the request ID. A BullMQ worker claims pending event rows, processes each in its own PostgreSQL transaction, retries with exponential backoff, and routes exhausted jobs to a dead-letter queue. On startup it re-enqueues durable requests left `RECEIVED` or `PROCESSING`. Without Redis configured, local development processes synchronously through the same service path.
+
+Normalized telemetry and operational events create outbox rows in the same PostgreSQL transaction as readings, vehicle state, and event status. A separate Kafka publisher claims un-published rows with a PostgreSQL lease, sends to `telemetry.normalized.v1` or `operational.events.v1` keyed by vehicle UUID, then marks the row published. A crash after Kafka accepts a message but before the DB mark can resend it; consumers deduplicate using the stable outbox event key. Delivery is at least once. Kafka partitioning preserves per-vehicle order within one topic, while independent consumer groups each keep their own inbox record. Kafka being unavailable leaves outbox rows durable for retry and does not roll back accepted telemetry.
+
+Prometheus metrics expose bounded-cardinality HTTP request counts/latencies, ingestion outcomes, BullMQ job results and queue wait time, outbox publication and pending counts, and per-consumer-group Kafka lag by topic partition. In production, `/metrics` is hidden unless the caller supplies the configured metrics bearer token.
 | Docker Compose | Phase 2 (optional, PostgreSQL is local) |

@@ -1,8 +1,8 @@
 # Parallax — Requirements
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 
-**Status:** Phase 2 — Schema Draft
+**Status:** Requirements baseline for the implemented MVP
 **Last updated:** 2026-11-01
 
 ---

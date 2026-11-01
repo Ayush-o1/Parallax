@@ -1,64 +1,73 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Parallax — Vehicle Telemetry Platform</title>
-  <style>
-    /* Minimal placeholder styles — full dashboard CSS comes in Phase 11 */
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #f8f9fa;
-      color: #1a1a2e;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      margin: 0;
-    }
-    .card {
-      background: #fff;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      padding: 48px 64px;
-      text-align: center;
-      max-width: 480px;
-    }
-    h1 { font-size: 1.75rem; font-weight: 700; margin: 0 0 8px; }
-    p  { color: #64748b; margin: 0 0 24px; font-size: 0.95rem; }
-    .badge {
-      display: inline-block;
-      background: #e8f5e9;
-      color: #2e7d32;
-      border-radius: 4px;
-      padding: 4px 12px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-    }
-    .status { margin-top: 24px; font-size: 0.85rem; color: #94a3b8; }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f8fb">
+  <title>Parallax | Fleet telemetry</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="card">
-    <h1>Parallax</h1>
-    <p>Multi-OEM Vehicle Telemetry Normalization &amp; Event Processing Platform</p>
-    <span class="badge">Phase 0 — Foundation</span>
-    <div class="status" id="status">Checking API&hellip;</div>
-  </div>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="#overview" aria-label="Parallax overview">
+        <span class="brand-mark" aria-hidden="true">P</span><span>parallax</span>
+      </a>
+      <p class="nav-caption">MONITORING</p>
+      <nav>
+        <button class="nav-link active" data-view="overview"><span>▦</span> Overview</button>
+        <button class="nav-link" data-view="vehicles"><span>◫</span> Vehicles</button>
+        <button class="nav-link" data-view="ingestion"><span>⇣</span> Ingestion</button>
+        <button class="nav-link" data-view="quarantine"><span>⚑</span> Quarantine</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="system-state"><span class="pulse-dot"></span><span><strong id="system-label">Checking services</strong><small id="last-refresh">—</small></span></div>
+        <button id="credentials-toggle" class="text-button">API credentials</button>
+      </div>
+    </aside>
 
-  <script>
-    // A minimal liveness check so you can confirm the server and frontend
-    // are wired together correctly. Full dashboard JS arrives in Phase 11.
-    fetch('/health')
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('status').textContent =
-          `API status: ${data.data.status} · uptime ${data.data.uptimeSeconds}s`;
-      })
-      .catch(() => {
-        document.getElementById('status').textContent = 'API unreachable';
-      });
-  </script>
+    <main class="main-content">
+      <header class="topbar">
+        <div><span class="eyebrow">FLEET OPERATIONS</span><h1 id="page-title">Overview</h1></div>
+        <div class="topbar-actions"><span class="environment-tag" id="tenant-label">Demo organization</span><button id="credentials-open" class="button secondary">Connect</button><button id="refresh-button" class="button secondary">Refresh</button></div>
+      </header>
+
+      <section id="credentials-panel" class="credentials-panel hidden" aria-labelledby="credentials-title">
+        <div><h2 id="credentials-title">Connect an API client</h2><p>Credentials are exchanged for a short-lived token and kept in this browser tab only.</p></div>
+        <form id="credentials-form">
+          <label>Client ID<input name="client_id" autocomplete="username" required></label>
+          <label>Client secret<input name="client_secret" type="password" autocomplete="current-password" required></label>
+          <button class="button primary" type="submit">Connect</button>
+        </form>
+        <p id="credentials-message" class="form-message" role="status"></p>
+      </section>
+
+      <div id="error-banner" class="error-banner hidden" role="alert"></div>
+
+      <section id="view-overview" class="view">
+        <div class="metric-grid" id="metrics" aria-live="polite"></div>
+        <div class="content-grid">
+          <article class="panel"><div class="panel-heading"><div><h2>Vehicles</h2><p>Latest reported state by registered vehicle</p></div><button class="text-button" data-view="vehicles">View all →</button></div><div id="overview-vehicles" class="table-wrap"></div></article>
+          <article class="panel source-panel"><div class="panel-heading"><div><h2>By source</h2><p>Registered fleet distribution</p></div></div><div id="source-breakdown" class="source-breakdown"></div><div class="panel-divider"></div><h3>Recent operational events</h3><div id="overview-events" class="event-list"></div></article>
+        </div>
+      </section>
+
+      <section id="view-vehicles" class="view hidden">
+        <article class="panel"><div class="panel-heading"><div><h2>Registered vehicles</h2><p>Search and inspect vehicle telemetry</p></div><div class="filters"><input id="vehicle-search" type="search" placeholder="Search VIN" aria-label="Search VIN"><select id="source-filter" aria-label="Filter by OEM"><option value="">All OEMs</option><option>OEM_ALPHA</option><option>OEM_BETA</option><option>OEM_GAMMA</option></select></div></div><div id="vehicles-table" class="table-wrap"></div></article>
+        <article id="vehicle-detail" class="panel detail-panel hidden"></article>
+      </section>
+
+      <section id="view-ingestion" class="view hidden">
+        <article class="panel"><div class="panel-heading"><div><h2>Ingestion requests</h2><p>Receipt status and batch outcomes</p></div><select id="ingestion-status"><option value="">All statuses</option><option>PROCESSING</option><option>COMPLETED</option><option>COMPLETED_WITH_ERRORS</option><option>MALFORMED</option></select></div><div id="ingestion-table" class="table-wrap"></div></article>
+      </section>
+
+      <section id="view-quarantine" class="view hidden">
+        <article class="panel"><div class="panel-heading"><div><h2>Quarantined data</h2><p>Rejected requests and event payloads with reasons</p></div><input id="quarantine-reason" type="search" placeholder="Filter reason" aria-label="Filter quarantine reason"></div><div id="quarantine-table" class="table-wrap"></div></article>
+      </section>
+      <footer>Parallax · Synthetic telemetry monitoring · <span id="footer-time"></span></footer>
+    </main>
+  </div>
+  <script src="/socket.io/socket.io.js" defer></script>
+  <script src="/app.js" defer></script>
 </body>
 </html>

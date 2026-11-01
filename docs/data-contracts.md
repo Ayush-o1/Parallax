@@ -1,8 +1,8 @@
 # Parallax — Data Contracts
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 
-**Status:** Phase 2 — Schema Draft
+**Status:** Implemented; runtime benchmarks are recorded in `docs/benchmarks/`
 **Last updated:** 2026-11-01
 
 ---
@@ -471,6 +471,10 @@ Persist the request as `RECEIVED` before parsing. If parsing fails, create a req
 - **Duplicate:** Preserve the `IngestionEvent` receipt attempt and set `DUPLICATE`; do not insert another reading or update state. The unique constraint determines the race-safe outcome.
 
 The raw request commit is outside these event transactions, so no event failure can roll back the original body. One batch item's transaction cannot roll back another item's outcome.
+
+Unknown source strings are retained as received in request and event rows, then quarantined as `UNKNOWN_SOURCE`. The original content-encoding header is stored with the request so a recovery worker can decode the body again after a crash between raw-body commit and event extraction. JSON parse failures are quarantined against the request, with no synthetic event row. For a valid batch, each member has its own ingestion-event ID, status, normalized reading (when accepted), and quarantine reason (when rejected).
+
+Production vehicle, telemetry, ingestion-history, quarantine, and event APIs resolve organization ownership only from a verified API client token. Client-supplied organization IDs are ignored. The seeded `demo` organization is disabled as an auth substitute in production.
 
 ### Atomic state UPSERT
 

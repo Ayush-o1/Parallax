@@ -37,8 +37,26 @@ model Organization {
 
   vehicles          Vehicle[]
   ingestionRequests IngestionRequest[]
+  apiClients        ApiClient[]
+  outboxEvents      OutboxEvent[]
 
   @@map("organizations")
+}
+
+model ApiClient {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  name           String    @db.VarChar(200)
+  clientId       String    @unique @map("client_id") @db.VarChar(100)
+  secretHash     String    @map("secret_hash") @db.VarChar(100)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt     DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, revokedAt])
+  @@map("api_clients")
 }
 
 model Vehicle {
@@ -54,6 +72,7 @@ model Vehicle {
   state             VehicleState?
   quarantineRecords QuarantineRecord[]
   derivedEvents     DerivedEvent[]
+  outboxEvents      OutboxEvent[]
 
   @@unique([organizationId, vin])
   @@index([source, vin])
@@ -65,6 +84,7 @@ model IngestionRequest {
   organizationId String                 @map("organization_id") @db.Uuid
   source         String                 @db.Text
   rawBody        Bytes                  @map("raw_body") @db.ByteA
+  contentEncoding String?               @map("content_encoding") @db.VarChar(32)
   parsedPayload  Json?                  @map("parsed_payload") @db.JsonB
   status         IngestionRequestStatus @default(RECEIVED)
   errorCode      String?                @map("error_code") @db.VarChar(100)
@@ -187,4 +207,40 @@ model DerivedEvent {
   @@index([vehicleId, occurredAt(sort: Desc)])
   @@index([eventType, occurredAt(sort: Desc)])
   @@map("derived_events")
+}
+
+model OutboxEvent {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  vehicleId      String    @map("vehicle_id") @db.Uuid
+  eventType      String    @map("event_type") @db.VarChar(100)
+  eventKey       String    @unique @map("event_key") @db.VarChar(300)
+  payload        Json      @db.JsonB
+  attempts       Int       @default(0)
+  availableAt    DateTime  @default(now()) @map("available_at") @db.Timestamptz(6)
+  claimedUntil   DateTime? @map("claimed_until") @db.Timestamptz(6)
+  publishedAt    DateTime? @map("published_at") @db.Timestamptz(6)
+  lastError      String?   @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  vehicle      Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([publishedAt, availableAt, claimedUntil, createdAt])
+  @@map("outbox_events")
+}
+
+model KafkaInbox {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consumerGroup String   @map("consumer_group") @db.VarChar(200)
+  eventKey      String   @map("event_key") @db.VarChar(300)
+  topic         String   @db.VarChar(200)
+  partition     Int
+  offset        BigInt
+  processedAt   DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@unique([consumerGroup, eventKey])
+  @@unique([consumerGroup, topic, partition, offset])
+  @@index([processedAt])
+  @@map("kafka_inbox")
 }

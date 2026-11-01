@@ -35,12 +35,19 @@ const config = require('../config/env');
  */
 function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
   // Operational errors may carry a preferred HTTP status.
-  const status = err.status || err.statusCode || 500;
+  const prismaStatus = err.code === 'P2002' || err.code === 'P2003' ? 409
+    : err.code === 'P2025' ? 404 : undefined;
+  const status = err.status || err.statusCode || prismaStatus || 500;
+  const safeCode = err.code && err.code.startsWith('P')
+    ? (err.code === 'P2025' ? 'RESOURCE_NOT_FOUND' : 'RESOURCE_CONFLICT')
+    : err.code;
 
   // Log the full error internally, including the stack in development.
+  const isPrismaError = Boolean(err.code && /^P\d{4}$/.test(err.code));
   logger.error('unhandled error', {
     status,
-    message: err.message,
+    message: isPrismaError ? 'Database operation failed.' : err.message,
+    ...(isPrismaError && { databaseCode: err.code, ...(err.meta?.target && { databaseTarget: err.meta.target }) }),
     // Use the route template rather than a raw URL that could contain IDs.
     path:    req.route ? `${req.baseUrl}${req.route.path}` : 'unmatched',
     method:  req.method,
@@ -53,7 +60,8 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
     error: {
       message: status < 500 ? err.message : 'Internal server error',
       // Expose the error code if present (e.g. 'VALIDATION_ERROR').
-      ...(err.code && { code: err.code }),
+      ...(safeCode && { code: safeCode }),
+      ...(err.details && { details: err.details }),
     },
   };
 

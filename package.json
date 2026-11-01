@@ -1,6 +1,6 @@
 {
   "name": "parallax",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Multi-OEM Vehicle Telemetry Normalization and Event Processing Platform",
   "main": "src/server.js",
   "engines": {
@@ -12,19 +12,34 @@
     "test": "npm run test:integration && npm run test:api && npm run test:unit",
     "test:unit": "NODE_ENV=test node --test --import ./tests/setup.js tests/unit/**/*.test.js",
     "test:integration": "NODE_ENV=test node scripts/prisma-command.js migrate deploy && NODE_ENV=test node scripts/prisma-command.js db seed && NODE_ENV=test node --test --import ./tests/setup.js tests/integration/**/*.test.js",
-    "test:api": "NODE_ENV=test node --test --import ./tests/setup.js tests/api/**/*.test.js",
-    "db:migrate": "node scripts/prisma-command.js migrate dev",
+    "test:api": "NODE_ENV=test node scripts/prisma-command.js migrate deploy && NODE_ENV=test node scripts/prisma-command.js db seed && NODE_ENV=test node --test --import ./tests/setup.js tests/api/**/*.test.js",
+    "db:migrate": "node scripts/prisma-command.js migrate deploy",
     "db:migrate:test": "NODE_ENV=test node scripts/prisma-command.js migrate deploy",
     "db:migrate:prod": "NODE_ENV=production node scripts/prisma-command.js migrate deploy",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:seed": "node scripts/prisma-command.js db seed",
-    "db:seed:test": "NODE_ENV=test node scripts/prisma-command.js db seed"
+    "db:seed:test": "NODE_ENV=test node scripts/prisma-command.js db seed",
+    "simulate": "node scripts/simulate.js",
+    "client:create": "node scripts/api-client.js create",
+    "client:revoke": "node scripts/api-client.js revoke",
+    "worker:start": "node scripts/worker.js",
+    "stream:start": "node scripts/streaming.js",
+    "benchmark": "node scripts/benchmark.js"
   },
   "dependencies": {
     "@prisma/client": "^6.9.0",
+    "bcryptjs": "^3.0.3",
+    "bullmq": "^6.5.3",
     "dotenv": "^18.0.9",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.7.2",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
+    "jose": "^6.2.14",
+    "kafkajs": "^2.2.4",
+    "prom-client": "^15.1.3",
+    "socket.io": "^4.8.4"
   },
   "devDependencies": {
     "prisma": "^6.9.0",

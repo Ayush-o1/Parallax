@@ -1,0 +1,7 @@
+node_modules
+.git
+.env
+.env.*
+coverage
+docs/benchmarks/*.json
+npm-debug.log

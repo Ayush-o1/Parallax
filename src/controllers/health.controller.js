@@ -6,18 +6,16 @@
  * A health endpoint serves two audiences:
  *   1. Load balancers and orchestrators (Kubernetes, Docker) that need
  *      a quick liveness check — "is the process running?"
- *   2. Developers and monitoring tools that want a richer readiness
- *      check — "is the process capable of serving traffic?"
+ *   2. Developers and monitoring tools that want basic process metadata.
  *
- * We implement a single /health route that returns basic process
- * information now. In later phases, when we have a database
- * connection, we will extend this to check DB reachability and
- * return a 503 if it is unavailable.
+ * This is a liveness endpoint. Dependency health is reported by the
+ * container health checks and service-specific metrics, not inferred here.
  */
 
 'use strict';
 
 const config = require('../config/env');
+const packageInfo = require('../../package.json');
 
 /**
  * GET /health
@@ -34,7 +32,7 @@ function getHealth(req, res) {
     data: {
       status:    'ok',
       service:   'parallax',
-      version:   process.env.npm_package_version || '0.1.0',
+      version:   packageInfo.version,
       nodeEnv:   config.nodeEnv,
       // Uptime in seconds — useful for detecting recent restarts.
       uptimeSeconds: Math.floor(process.uptime()),

@@ -6,6 +6,26 @@ Format: `[version] — date`
 
 ---
 
+## [0.4.0] — 2026-11-01
+
+### Added
+- Tenant-scoped vehicle, telemetry history, state, ingestion, quarantine, operational-event, and dashboard summary APIs.
+- Three OEM payload adapters and deterministic synthetic simulators with invalid, duplicate, late, delayed, and disconnected scenarios.
+- Production client-credentials authentication, revocation, authorization scoping, responsive dashboard, and organization-scoped Socket.IO updates.
+- Redis/BullMQ asynchronous processing with retries, dead-letter routing, raw-request recovery, and explicit `ioredis` runtime dependency.
+- Transactional outbox, Kafka-compatible topic publishing, realtime/analytics consumer groups, inbox idempotency, and per-process Prometheus metrics.
+- Docker Compose stack, CI workflow, API guide, Postman collection, and reproducible benchmark harness/reports.
+
+### Fixed
+- Reprocessing persisted requests now reloads committed parse state before event extraction, preventing duplicate event ordinals.
+- Replay decodes compressed request bodies from persisted raw bytes, and normalized VIN fixtures now match the adapter's canonical uppercase form.
+- Docker's Redpanda health check uses supported `rpk` flags; topic creation is shared across concurrently starting Kafka clients.
+- Prisma Docker images install OpenSSL so the generated PostgreSQL engine matches the runtime.
+
+### Measured
+- Ran 1,000 direct and 1,000 batch events with the full Compose queue and Kafka paths.
+- Ran 10,000 direct and 10,000 batch events with actual persisted reads, outbox publication, and consumer inbox delivery. Reports include machine/runtime details, latency percentiles, error/outcome counts, queue delay, and `EXPLAIN ANALYZE`.
+
 ## [0.3.0] — 2026-11-01
 
 ### Added

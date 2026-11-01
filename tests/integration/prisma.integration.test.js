@@ -80,7 +80,7 @@ describe('Prisma/PostgreSQL persistence integration', { concurrency: false }, ()
     const vehicle = await prisma.vehicle.create({
       data: {
         organizationId: organization.id,
-        vin: `IT${randomUUID().replaceAll('-', '').slice(0, 15)}`,
+        vin: `1HGCM82633A${randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`,
         source: 'OEM_ALPHA',
       },
     });
@@ -89,6 +89,7 @@ describe('Prisma/PostgreSQL persistence integration', { concurrency: false }, ()
 
   after(async () => {
     if (fixture.vehicleId) {
+      await prisma.outboxEvent.deleteMany({ where: { vehicleId: fixture.vehicleId } });
       await prisma.derivedEvent.deleteMany({ where: { vehicleId: fixture.vehicleId } });
       await prisma.vehicleState.deleteMany({ where: { vehicleId: fixture.vehicleId } });
       await prisma.quarantineRecord.deleteMany({ where: { requestId: { in: fixture.requestIds } } });
@@ -231,6 +232,35 @@ describe('Prisma/PostgreSQL persistence integration', { concurrency: false }, ()
     await assert.rejects(prisma.derivedEvent.create({ data: derived }), (error) => error.code === 'P2002');
   });
 
+  it('enforces transactional outbox keys and consumer-group inbox idempotency', async () => {
+    const first = await prisma.outboxEvent.create({ data: {
+      organizationId: fixture.organizationId,
+      vehicleId: fixture.vehicleId,
+      eventType: 'TELEMETRY_NORMALIZED',
+      eventKey: `telemetry:${fixture.vehicleId}:${randomUUID()}`,
+      payload: { speedKph: 12.5 },
+    } });
+    fixture.outboxIds = fixture.outboxIds || [];
+    fixture.outboxIds.push(first.id);
+    const duplicate = {
+      organizationId: fixture.organizationId,
+      vehicleId: fixture.vehicleId,
+      eventType: 'TELEMETRY_NORMALIZED',
+      eventKey: first.eventKey,
+      payload: { speedKph: 12.5 },
+    };
+    await assert.rejects(prisma.outboxEvent.create({ data: duplicate }), (error) => error.code === 'P2002');
+    const inbox = {
+      consumerGroup: 'integration-consumer',
+      eventKey: first.eventKey,
+      topic: 'telemetry.normalized.v1',
+      partition: 0,
+      offset: BigInt(Date.now()),
+    };
+    await prisma.kafkaInbox.create({ data: inbox });
+    await assert.rejects(prisma.kafkaInbox.create({ data: inbox }), (error) => error.code === 'P2002');
+  });
+
   it('rolls back a failed transaction without leaving partial request data', async () => {
     const before = await prisma.ingestionRequest.count({ where: { organizationId: fixture.organizationId } });
     await assert.rejects(prisma.$transaction(async (tx) => {
@@ -246,5 +276,24 @@ describe('Prisma/PostgreSQL persistence integration', { concurrency: false }, ()
 
     const afterCount = await prisma.ingestionRequest.count({ where: { organizationId: fixture.organizationId } });
     assert.equal(afterCount, before);
+  });
+
+  it('recovers a raw request committed before parsing or event extraction', async () => {
+    const vehicle = await prisma.vehicle.findUniqueOrThrow({ where: { id: fixture.vehicleId } });
+    const payload = {
+      vin: vehicle.vin, speed: 20, speed_unit: 'mph', odometer: 50_000,
+      latitude: 12.9, longitude: 77.5, fuel_level: 60, engine_on: true,
+      event_id: `RECOVER-${randomUUID()}`, timestamp: new Date().toISOString(),
+    };
+    const request = await createRequest({ rawBody: Buffer.from(JSON.stringify(payload)) });
+    assert.equal(request.parsedAt, null);
+    assert.ok(await prisma.vehicle.findFirst({ where: { organizationId: request.organizationId, vin: vehicle.vin } }));
+
+    const ingestionService = require('../../src/services/ingestion.service');
+    const outcome = await ingestionService.processRequest(request.id);
+    const quarantine = await prisma.quarantineRecord.findFirst({ where: { requestId: request.id } });
+    assert.equal(outcome.status, 'COMPLETED', JSON.stringify({ outcome, quarantine }));
+    assert.equal(outcome.eventResults[0].status, 'ACCEPTED');
+    assert.ok(await prisma.ingestionEvent.findFirst({ where: { requestId: request.id } }));
   });
 });

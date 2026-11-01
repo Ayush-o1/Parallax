@@ -59,6 +59,10 @@ const config = {
   // Separate connection string used by the test runner.
   // Kept as a separate property so test helpers can reference it directly.
   testDatabaseUrl: process.env.TEST_DATABASE_URL,
+  tokenSigningSecret: process.env.TOKEN_SIGNING_SECRET
+    || (process.env.NODE_ENV === 'production' ? undefined : 'parallax-local-only-token-signing-secret-change-me'),
+  accessTokenSeconds: parseInt(process.env.ACCESS_TOKEN_SECONDS || '3600', 10),
+  redisUrl: process.env.REDIS_URL,
 
   // Logging verbosity. Accepted: debug | info | warn | error
   logLevel: process.env.LOG_LEVEL || 'info',
@@ -123,6 +127,7 @@ const config = {
     process.env.IDLING_THRESHOLD_SECONDS || '180',
     10
   ),
+  hardBrakingAccelMss: parseFloat(process.env.HARD_BRAKING_ACCEL_MSS || '-3'),
 
   // Derived helpers.
   isDevelopment() { return this.nodeEnv === 'development'; },
@@ -205,12 +210,16 @@ function validateConfig() {
     TRIP_START_SPEED_KPH: config.tripStartSpeedKph,
     TRIP_END_STATIONARY_SECONDS: config.tripEndStationarySeconds,
     IDLING_THRESHOLD_SECONDS: config.idlingThresholdSeconds,
+    ACCESS_TOKEN_SECONDS: config.accessTokenSeconds,
   };
   const invalid = Object.entries(positiveSettings)
     .filter(([key, value]) => !Number.isFinite(value) || value <= 0 || (key === 'PORT' && value > 65535))
     .map(([key]) => key);
   if (invalid.length) {
     throw new Error(`Invalid environment variable values: ${invalid.join(', ')}.`);
+  }
+  if (config.isProduction() && (!config.tokenSigningSecret || Buffer.byteLength(config.tokenSigningSecret) < 32)) {
+    throw new Error('TOKEN_SIGNING_SECRET must be at least 32 bytes in production.');
   }
 }
 

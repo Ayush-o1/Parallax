@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-11-01T07:42:00.200Z",
+  "machine": {
+    "platform": "Darwin 27.0.0",
+    "arch": "arm64",
+    "cpus": 10,
+    "memoryGiB": 16
+  },
+  "node": "v24.22.1",
+  "postgres": "PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "workload": {
+    "directEvents": 10000,
+    "batchEvents": 10000,
+    "batchSize": 25,
+    "concurrency": 16,
+    "vehicleCount": 1,
+    "workerConcurrency": 16
+  },
+  "ingestionMode": "asynchronous (Redis/BullMQ)",
+  "metrics": {
+    "direct": {
+      "samples": 10000,
+      "meanMs": 13.27,
+      "p50Ms": 12.19,
+      "p95Ms": 21.02,
+      "p99Ms": 30.11
+    },
+    "batch": {
+      "samples": 400,
+      "meanMs": 10.51,
+      "p50Ms": 9.27,
+      "p95Ms": 13.69,
+      "p99Ms": 15.3
+    },
+    "duplicate": {
+      "samples": 1,
+      "meanMs": 3.7,
+      "p50Ms": 3.7,
+      "p95Ms": 3.7,
+      "p99Ms": 3.7
+    },
+    "reads": {
+      "samples": 20,
+      "meanMs": 5.21,
+      "p50Ms": 4.74,
+      "p95Ms": 7.24,
+      "p99Ms": 7.24
+    }
+  },
+  "wallClock": {
+    "directMs": 8305.01,
+    "batchMs": 4226.07
+  },
+  "batchEventsPerSecond": 2366.26,
+  "directEventsPerSecond": 1204.09,
+  "telemetryRowsPersisted": 20000,
+  "outboxRowsPersisted": 20001,
+  "outboxRowsPublished": 20001,
+  "kafkaInboxRows": {
+    "parallax.analytics.v1": 20001,
+    "parallax.realtime.v1": 20001
+  },
+  "ingestionStatusCounts": {
+    "ACCEPTED": 20000,
+    "DUPLICATE": 1
+  },
+  "errorRate": 0,
+  "requestCompletionMs": {
+    "samples": 10401,
+    "mean": 10940.18,
+    "p95": 16307
+  },
+  "queryPlan": [
+    "Limit  (cost=0.28..24.06 rows=50 width=31) (actual time=0.011..0.019 rows=50.00 loops=1)",
+    "  Buffers: shared hit=5",
+    "  ->  Index Scan using telemetry_readings_vehicle_id_event_time_idx on telemetry_readings  (cost=0.28..2126.03 rows=4471 width=31) (actual time=0.010..0.016 rows=50.00 loops=1)",
+    "        Index Cond: (vehicle_id = 'd1e86d9f-b02d-4e05-95a2-a9acda34f6e6'::uuid)",
+    "        Index Searches: 1",
+    "        Buffers: shared hit=5",
+    "Planning:",
+    "  Buffers: shared hit=91 read=9 written=7",
+    "Planning Time: 0.474 ms",
+    "Execution Time: 0.027 ms"
+  ]
+}

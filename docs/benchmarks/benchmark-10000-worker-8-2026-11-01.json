@@ -1,0 +1,84 @@
+{
+  "generatedAt": "2026-11-01T07:39:43.693Z",
+  "machine": {
+    "platform": "Darwin 27.0.0",
+    "arch": "arm64",
+    "cpus": 10,
+    "memoryGiB": 16
+  },
+  "node": "v24.22.1",
+  "postgres": "PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "workload": {
+    "directEvents": 10000,
+    "batchEvents": 10000,
+    "batchSize": 25,
+    "concurrency": 16,
+    "vehicleCount": 1
+  },
+  "ingestionMode": "asynchronous (Redis/BullMQ)",
+  "metrics": {
+    "direct": {
+      "samples": 10000,
+      "meanMs": 14.27,
+      "p50Ms": 13.15,
+      "p95Ms": 22.75,
+      "p99Ms": 32.14
+    },
+    "batch": {
+      "samples": 400,
+      "meanMs": 11.37,
+      "p50Ms": 11.5,
+      "p95Ms": 13.54,
+      "p99Ms": 17.07
+    },
+    "duplicate": {
+      "samples": 1,
+      "meanMs": 3.85,
+      "p50Ms": 3.85,
+      "p95Ms": 3.85,
+      "p99Ms": 3.85
+    },
+    "reads": {
+      "samples": 20,
+      "meanMs": 4.93,
+      "p50Ms": 4.56,
+      "p95Ms": 5.95,
+      "p99Ms": 5.95
+    }
+  },
+  "wallClock": {
+    "directMs": 8930.21,
+    "batchMs": 4569.95
+  },
+  "batchEventsPerSecond": 2188.21,
+  "directEventsPerSecond": 1119.79,
+  "telemetryRowsPersisted": 20000,
+  "outboxRowsPersisted": 20001,
+  "outboxRowsPublished": 20001,
+  "kafkaInboxRows": {
+    "parallax.analytics.v1": 20001,
+    "parallax.realtime.v1": 20001
+  },
+  "ingestionStatusCounts": {
+    "ACCEPTED": 20000,
+    "DUPLICATE": 1
+  },
+  "errorRate": 0,
+  "requestCompletionMs": {
+    "samples": 10401,
+    "mean": 12132.07,
+    "p95": 18272
+  },
+  "queryPlan": [
+    "Limit  (cost=0.29..6.09 rows=50 width=31) (actual time=0.017..0.028 rows=50.00 loops=1)",
+    "  Buffers: shared hit=5",
+    "  ->  Index Scan using telemetry_readings_vehicle_id_event_time_idx on telemetry_readings  (cost=0.29..2286.86 rows=19711 width=31) (actual time=0.017..0.025 rows=50.00 loops=1)",
+    "        Index Cond: (vehicle_id = 'b69651b3-c772-4805-8e7c-b7236ec2e5e6'::uuid)",
+    "        Index Searches: 1",
+    "        Buffers: shared hit=5",
+    "Planning:",
+    "  Buffers: shared hit=100",
+    "Planning Time: 0.311 ms",
+    "Execution Time: 0.039 ms"
+  ]
+}
